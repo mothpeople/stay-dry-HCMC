@@ -1,0 +1,883 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, MapPin, Droplets, CloudRain, AlertTriangle, Activity, Wind, Navigation, Layers, Crosshair, Waves, Newspaper, Sun, Moon, Info, Heart, ExternalLink } from 'lucide-react';
+
+// Ho Chi Minh City Constants
+const HCMC_CENTER = [10.7769, 106.7009];
+const HCMC_BOUNDS = [
+  [10.3500, 106.3000],
+  [11.1600, 107.0200] 
+];
+
+// Color Themes
+const THEMES = {
+  dark: {
+    name: 'dark',
+    bg: 'bg-slate-950',
+    textMain: 'text-slate-100',
+    textSub: 'text-slate-400',
+    cardBg: 'bg-slate-900',
+    cardBorder: 'border-slate-800',
+    inputBg: 'bg-slate-800',
+    inputBorder: 'border-slate-700',
+    accentPrimary: 'text-blue-400', // Blue for dark mode
+    accentSecondary: 'text-lime-400',
+    buttonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white',
+    buttonSecondary: 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750',
+    highlight: 'bg-blue-900/30 text-blue-300 border-blue-800/50',
+    mapFilter: 'brightness(0.8) contrast(1.2)'
+  },
+  light: {
+    name: 'light',
+    bg: 'bg-lime-50', // Very Pale Green Background
+    textMain: 'text-stone-800',
+    textSub: 'text-stone-500',
+    cardBg: 'bg-white',
+    cardBorder: 'border-lime-100',
+    inputBg: 'bg-stone-50',
+    inputBorder: 'border-stone-200',
+    accentPrimary: 'text-lime-700', // Olive Green replacing Blue
+    accentSecondary: 'text-lime-600',
+    buttonPrimary: 'bg-lime-700 hover:bg-lime-800 text-white', // Olive Button
+    buttonSecondary: 'bg-white border-lime-200 text-lime-700 hover:bg-lime-50',
+    highlight: 'bg-lime-100 text-lime-800 border-lime-200',
+    mapFilter: 'none'
+  }
+};
+
+export default function App() {
+  // State
+  const [address, setAddress] = useState('');
+  const [isDarkMode, setIsDarkMode] = useState(false); // Default to Light Mode
+  const [suggestions, setSuggestions] = useState([]); 
+  const [showSuggestions, setShowSuggestions] = useState(false); 
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+  const [mapInstance, setMapInstance] = useState(null);
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [isPinMode, setIsPinMode] = useState(false);
+  
+  const theme = isDarkMode ? THEMES.dark : THEMES.light;
+
+  // Refs
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const circleRef = useRef(null);
+  const debounceTimerRef = useRef(null); 
+
+  // --- PWA Service Worker Registration ---
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(registration => {
+            console.log('SW registered: ', registration);
+          })
+          .catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+          });
+      });
+    }
+  }, []);
+
+  // --- Helper for Safety Color Coding ---
+  const getStatusColor = (value, type) => {
+    if (isDarkMode) return 'text-slate-100'; // Keep dark mode text neutral/white mostly
+
+    // Light Mode Safety Spectrum (Green -> Orange -> Red)
+    const SAFE = 'text-lime-600';
+    const WARN = 'text-orange-500';
+    const DANGER = 'text-red-600';
+
+    switch (type) {
+      case 'rain': 
+        if (value > 30) return DANGER;
+        if (value > 10) return WARN;
+        return SAFE;
+      case 'flood':
+        if (value === 'Critical' || value === 'High') return DANGER;
+        if (value === 'Moderate') return WARN;
+        return SAFE;
+      case 'traffic':
+        if (value === 'Heavy') return DANGER;
+        if (value === 'Moderate') return WARN;
+        return SAFE;
+      case 'tide':
+        // High tides generally increase risk
+        if (value === 'High') return WARN;
+        return SAFE;
+      case 'canal':
+        if (value > 2.0) return DANGER; // Warning Threshold
+        if (value > 1.5) return WARN;
+        return SAFE;
+      case 'temp':
+        if (value > 35) return DANGER;
+        if (value > 31) return WARN;
+        return SAFE;
+      default:
+        return theme.textMain;
+    }
+  };
+
+  // 1. Load Leaflet
+  useEffect(() => {
+    const existingScript = document.querySelector('script[src*="leaflet.js"]');
+    const existingLink = document.querySelector('link[href*="leaflet.css"]');
+
+    if (existingScript && existingLink && window.L) {
+      setLeafletLoaded(true);
+      return;
+    }
+
+    if (!existingLink) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+
+    if (!existingScript) {
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      script.async = true;
+      script.onload = () => {
+        setTimeout(() => setLeafletLoaded(true), 100);
+      };
+      document.body.appendChild(script);
+    } else {
+      const checkL = setInterval(() => {
+        if (window.L && window.L.map) {
+          setLeafletLoaded(true);
+          clearInterval(checkL);
+        }
+      }, 200);
+      return () => clearInterval(checkL);
+    }
+  }, []);
+
+  // 2. Initialize Map
+  useEffect(() => {
+    if (!leafletLoaded || !mapRef.current || mapInstance) return;
+    if (!window.L || typeof window.L.map !== 'function') return;
+
+    try {
+      const map = window.L.map(mapRef.current, {
+        center: HCMC_CENTER,
+        zoom: 12,
+        minZoom: 10,
+        maxBounds: HCMC_BOUNDS, 
+        maxBoundsViscosity: 1.0 
+      });
+
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      setMapInstance(map);
+    } catch (err) {
+      console.error(err);
+    }
+
+    return () => {
+      if (mapInstance) {
+        mapInstance.remove();
+        setMapInstance(null);
+      }
+    };
+  }, [leafletLoaded]);
+
+  // 3. Map Click Handling
+  useEffect(() => {
+    if (!mapInstance) return;
+
+    const handleMapClick = async (e) => {
+      if (!isPinMode) return;
+
+      const { lat, lng } = e.latlng;
+      
+      if (lat < HCMC_BOUNDS[0][0] || lat > HCMC_BOUNDS[1][0] || 
+          lng < HCMC_BOUNDS[0][1] || lng > HCMC_BOUNDS[1][1]) {
+        setError("Please select a location inside Ho Chi Minh City.");
+        return;
+      }
+
+      setIsPinMode(false); 
+      setLoading(true);
+      setError(null);
+      setSuggestions([]); 
+
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
+        const data = await res.json();
+        
+        const formattedAddr = formatAddress(data.address);
+        setAddress(formattedAddr); 
+        
+        await fetchEnvironmentalData(lat, lng, formattedAddr);
+
+      } catch (err) {
+        setError("Failed to retrieve location data.");
+        setLoading(false);
+      }
+    };
+
+    if (mapRef.current) {
+      mapRef.current.style.cursor = isPinMode ? 'crosshair' : 'grab';
+    }
+
+    mapInstance.on('click', handleMapClick);
+    return () => mapInstance.off('click', handleMapClick);
+  }, [mapInstance, isPinMode]);
+
+  // 4. Update Map Markers
+  useEffect(() => {
+    if (!mapInstance || !data || !window.L) return;
+
+    const { lat, lng } = data.coords;
+    mapInstance.setView([lat, lng], 13);
+
+    if (markerRef.current) mapInstance.removeLayer(markerRef.current);
+    if (circleRef.current) mapInstance.removeLayer(circleRef.current);
+
+    const newMarker = window.L.marker([lat, lng]).addTo(mapInstance);
+    newMarker.bindPopup(`<b>${data.location}</b>`).openPopup();
+    markerRef.current = newMarker;
+
+    const newCircle = window.L.circle([lat, lng], {
+      color: isDarkMode ? '#3b82f6' : '#65a30d', // Blue in dark, Olive/Lime in light
+      fillColor: isDarkMode ? '#3b82f6' : '#65a30d',
+      fillOpacity: 0.1,
+      radius: 5000
+    }).addTo(mapInstance);
+    circleRef.current = newCircle;
+
+    mapInstance.panInsideBounds(HCMC_BOUNDS);
+  }, [data, mapInstance, isDarkMode]);
+
+
+  // --- Helpers ---
+
+  // Standardize Address
+  const formatAddress = (addrObj) => {
+    if (!addrObj) return "Unknown Location";
+    const street = addrObj.road || addrObj.pedestrian || addrObj.street || "";
+    const ward = addrObj.quarter || addrObj.ward || addrObj.neighbourhood || "";
+    const district = addrObj.city_district || addrObj.district || addrObj.suburb || "";
+    const parts = [];
+    if (street) parts.push(street);
+    if (ward) parts.push(ward.includes('Phường') ? ward : `Phường ${ward}`);
+    if (district) parts.push(district);
+    return parts.length > 0 ? parts.join(', ') : (addrObj.city || "Ho Chi Minh City");
+  };
+
+
+  // Core Data Fetching
+  const fetchEnvironmentalData = async (lat, lng, formattedAddress) => {
+    try {
+      const weatherRes = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&hourly=soil_moisture_0_to_1cm,precipitation_probability&timezone=Asia%2FHo_Chi_Minh`
+      );
+      if (!weatherRes.ok) throw new Error("Weather service unavailable");
+      
+      const weatherData = await weatherRes.json();
+      const current = weatherData.current;
+      const hourly = weatherData.hourly;
+      
+      const recentSoilMoisture = hourly.soil_moisture_0_to_1cm[0] || 0;
+      const currentRain = current.rain || 0;
+      const nextHourRainProb = hourly.precipitation_probability ? hourly.precipitation_probability[1] : 0;
+
+      // Flood Risk Calculation
+      const baseLevel = 1.0 + (Math.random() * 0.5); 
+      const rainImpact = currentRain * 0.05; 
+      const tideImpact = 0.4; 
+      const canalLevel = baseLevel + rainImpact + tideImpact;
+      const warningThreshold = 2.0; 
+
+      let floodRiskScore = 0;
+      let floodRiskLevel = "Low";
+
+      if (recentSoilMoisture > 0.35) floodRiskScore += 15;
+      if (recentSoilMoisture > 0.45) floodRiskScore += 15;
+      if (currentRain > 5) floodRiskScore += 10;
+      if (currentRain > 15) floodRiskScore += 10;
+      if (currentRain > 30) floodRiskScore += 10;
+      if (canalLevel > 1.5) floodRiskScore += 15;
+      if (canalLevel > warningThreshold) floodRiskScore += 25;
+
+      if (floodRiskScore > 80) floodRiskLevel = "Critical";
+      else if (floodRiskScore > 50) floodRiskLevel = "High";
+      else if (floodRiskScore > 30) floodRiskLevel = "Moderate";
+
+      const trafficConditions = generateTrafficReport(currentRain, current.is_day);
+      const tideData = generateTideData();
+      const newsUpdates = generateNewsUpdates(floodRiskLevel, currentRain, nextHourRainProb);
+
+      setData({
+        location: formattedAddress,
+        coords: { lat, lng },
+        weather: {
+          temp: current.temperature_2m,
+          feelsLike: current.apparent_temperature,
+          humidity: current.relative_humidity_2m,
+          rain: currentRain,
+          nextHourProb: nextHourRainProb,
+          wind: current.wind_speed_10m,
+          code: current.weather_code
+        },
+        flood: {
+          level: floodRiskLevel,
+          score: floodRiskScore,
+          soilMoisture: recentSoilMoisture,
+          canalLevel: canalLevel.toFixed(2), 
+          warningThreshold: warningThreshold
+        },
+        traffic: trafficConditions,
+        tides: tideData,
+        news: newsUpdates
+      });
+    } catch (err) {
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setAddress(value);
+    
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    if (!value.trim()) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        const viewbox = '106.3,11.2,107.1,10.3'; 
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=${viewbox}&bounded=1&countrycodes=vn&limit=5&addressdetails=1`
+        );
+        if (res.ok) {
+          const results = await res.json();
+          setSuggestions(results);
+          setShowSuggestions(true);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }, 500);
+  };
+
+  const handleSuggestionClick = async (suggestion) => {
+    const formatted = formatAddress(suggestion.address);
+    setAddress(formatted);
+    setShowSuggestions(false);
+    setSuggestions([]); 
+    setLoading(true);
+    setError(null);
+
+    try {
+       const latNum = parseFloat(suggestion.lat);
+       const lonNum = parseFloat(suggestion.lon);
+       if (latNum < HCMC_BOUNDS[0][0] || latNum > HCMC_BOUNDS[1][0] || 
+           lonNum < HCMC_BOUNDS[0][1] || lonNum > HCMC_BOUNDS[1][1]) {
+          throw new Error("Selected location is outside HCMC boundaries.");
+       }
+       await fetchEnvironmentalData(latNum, lonNum, formatted);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!address.trim()) return;
+    setShowSuggestions(false); 
+    setLoading(true);
+    setError(null);
+    try {
+      const viewbox = '106.3,11.2,107.1,10.3';
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=${viewbox}&bounded=1&countrycodes=vn&addressdetails=1`);
+      if (!geoRes.ok) throw new Error("Geocoding service unavailable");
+      const geoData = await geoRes.json();
+      if (!geoData || geoData.length === 0) throw new Error("Address not found in Ho Chi Minh City area.");
+      const location = geoData[0];
+      const latNum = parseFloat(location.lat);
+      const lonNum = parseFloat(location.lon);
+      if (latNum < HCMC_BOUNDS[0][0] || latNum > HCMC_BOUNDS[1][0] || 
+          lonNum < HCMC_BOUNDS[0][1] || lonNum > HCMC_BOUNDS[1][1]) {
+         throw new Error("Location found is outside the supported HCMC area.");
+      }
+      await fetchEnvironmentalData(latNum, lonNum, formatAddress(location.address));
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  const generateTrafficReport = (rain, isDay) => {
+    const baseCongestion = Math.floor(Math.random() * 30) + 10;
+    const rainFactor = rain > 0 ? 20 : 0;
+    const timeFactor = isDay ? 10 : 0;
+    const totalCongestion = Math.min(baseCongestion + rainFactor + timeFactor, 100);
+    
+    let status = "Clear";
+    if (totalCongestion > 40) status = "Moderate";
+    if (totalCongestion > 70) status = "Heavy";
+
+    return {
+      congestion: totalCongestion,
+      status: status,
+      avgSpeed: 50 - (totalCongestion * 0.4),
+      incidents: totalCongestion > 60 ? Math.floor(Math.random() * 3) + 1 : 0
+    };
+  };
+
+  const generateTideData = () => {
+    return [
+      { type: 'High', time: '04:30 AM', height: '3.8m' },
+      { type: 'Low', time: '10:15 AM', height: '1.2m' },
+      { type: 'High', time: '05:45 PM', height: '4.1m' },
+      { type: 'Low', time: '11:30 PM', height: '0.9m' }
+    ];
+  };
+
+  const generateNewsUpdates = (riskLevel, rain, nextProb) => {
+    const updates = [];
+    if (riskLevel === 'High' || riskLevel === 'Critical') {
+        updates.push({
+            source: 'HCMC Flood Control Center',
+            time: '10 mins ago',
+            text: 'WARNING: High water levels detected in low-lying districts. Avoid Nguyen Huu Canh and Thao Dien areas.',
+            type: 'alert',
+            url: 'https://phongchongthientai.hochiminhcity.gov.vn/'
+        });
+    }
+    if (rain > 10 || nextProb > 60) {
+         updates.push({
+            source: 'National Hydro-Meteorological Service',
+            time: '25 mins ago',
+            text: 'Heavy rain advisory in effect. Visibility may be reduced on major bridges.',
+            type: 'warning',
+            url: 'https://nchmf.gov.vn/'
+        });
+    } else {
+        updates.push({
+            source: 'HCMC Urban Environment',
+            time: '1 hour ago',
+            text: 'Regular drainage maintenance scheduled for District 1 tonight.',
+            type: 'info',
+            url: 'https://citenco.com.vn/'
+        });
+    }
+    if (updates.length < 2) {
+         updates.push({
+            source: 'City Traffic Authority',
+            time: '2 hours ago',
+            text: 'Traffic flow normal on Vo Van Kiet highway.',
+            type: 'info',
+            url: 'http://giaothong.hochiminhcity.gov.vn/'
+        });
+    }
+    return updates;
+  };
+
+  const getWeatherIcon = (code) => {
+    // In light mode, these icons take on the olive color
+    const colorClass = isDarkMode ? 'text-yellow-500' : 'text-lime-700';
+    if (code <= 3) return <Activity className={colorClass} size={24} />;
+    if (code <= 67) return <CloudRain className={theme.accentPrimary} size={24} />;
+    return <AlertTriangle className={theme.textSub} size={24} />;
+  };
+
+  return (
+    <div className={`min-h-screen font-sans flex flex-col transition-colors duration-300 ${theme.bg} ${theme.textMain}`}>
+      {/* Dynamic Styles for Map & Scrollbar */}
+      <style>{`
+        .leaflet-container {
+          width: 100%;
+          height: 100%;
+          border-radius: 0.5rem;
+          z-index: 10;
+          filter: ${theme.mapFilter}; 
+          transition: filter 0.5s ease;
+        }
+        ::-webkit-scrollbar {
+          width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+          background: ${isDarkMode ? '#0f172a' : '#f5f5f4'}; 
+        }
+        ::-webkit-scrollbar-thumb {
+          background: ${isDarkMode ? '#334155' : '#cbd5e1'}; 
+          border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+          background: ${isDarkMode ? '#475569' : '#94a3b8'}; 
+        }
+        .cursor-crosshair {
+          cursor: crosshair !important;
+        }
+      `}</style>
+
+      {/* Header */}
+      <header className={`${theme.cardBg} shadow-sm border-b ${theme.cardBorder} px-6 py-4 flex items-center justify-between z-20 sticky top-0 transition-colors`}>
+        <div className="flex items-center gap-3">
+          <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}>
+            <MapPin size={20} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-stone-800 dark:text-white">
+               Stay Dry
+            </h1>
+            <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase tracking-wide`}>
+               <div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>
+               Ho Chi Minh City
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          {/* PayPal Button - Always visible */}
+          <a 
+            href="https://paypal.me/sivarajpragasm" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-3 py-2 rounded-full bg-[#0070BA] text-white text-xs font-bold hover:bg-[#003087] transition-colors shadow-sm"
+          >
+            <Heart size={14} className="fill-white" />
+            Donate
+          </a>
+
+          <button 
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className={`p-2 rounded-full border ${theme.cardBorder} ${theme.textSub} hover:${theme.bg} transition-all`}
+          >
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full gap-6 grid grid-cols-1 lg:grid-cols-3 h-auto min-h-[calc(100vh-80px)]">
+        
+        {/* Left Panel */}
+        <div className="lg:col-span-1 flex flex-col gap-4">
+          
+          {/* Search Box */}
+          <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} relative z-30 transition-colors`}>
+            <label className={`block text-xs font-semibold ${theme.textSub} uppercase mb-2`}>Find Location</label>
+            <div className="flex gap-2">
+              <form onSubmit={handleSearch} className="relative flex-1">
+                <input
+                  type="text"
+                  value={address}
+                  onChange={handleInputChange}
+                  placeholder="Street, Ward, District..."
+                  className={`w-full pl-10 pr-4 py-3 ${theme.inputBg} border ${theme.inputBorder} rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all text-sm ${theme.textMain} placeholder-${isDarkMode ? 'slate-500' : 'slate-400'}`}
+                  autoComplete="off"
+                />
+                <Search className={`absolute left-3 top-3.5 ${theme.textSub}`} size={18} />
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className={`absolute right-2 top-2 p-1.5 rounded-md transition-colors disabled:opacity-50 ${theme.buttonPrimary}`}
+                >
+                  {loading ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"/> : <Navigation size={16} />}
+                </button>
+                
+                {/* Auto-suggest Dropdown */}
+                {showSuggestions && suggestions.length > 0 && (
+                  <div className={`absolute top-full left-0 right-0 mt-1 ${theme.cardBg} border ${theme.cardBorder} rounded-lg shadow-xl overflow-hidden z-50 max-h-60 overflow-y-auto`}>
+                    {suggestions.map((item, idx) => (
+                      <div 
+                        key={idx}
+                        onClick={() => handleSuggestionClick(item)}
+                        className={`p-3 hover:${theme.inputBg} cursor-pointer border-b ${theme.cardBorder} last:border-0 transition-colors text-sm`}
+                      >
+                        <div className="font-medium truncate">{formatAddress(item.address)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              </form>
+              
+              <button
+                onClick={() => setIsPinMode(!isPinMode)}
+                className={`p-3 rounded-lg border transition-all flex items-center justify-center ${
+                  isPinMode 
+                    ? theme.highlight 
+                    : theme.buttonSecondary
+                }`}
+                title="Select location on map"
+              >
+                <Crosshair size={20} />
+              </button>
+            </div>
+
+            {isPinMode && (
+              <div className={`mt-3 text-xs px-3 py-2 rounded border animate-pulse ${theme.highlight}`}>
+                Click anywhere in HCMC to select.
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-3 p-3 bg-red-900/20 text-red-400 text-sm rounded-lg flex items-center gap-2 border border-red-900/30">
+                <AlertTriangle size={16} />
+                {error}
+              </div>
+            )}
+          </div>
+
+          {!data && !loading && (
+            <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[300px]`}>
+              <MapPin size={48} className="mb-4 opacity-20" />
+              <p className="text-center text-sm">Search for a street or district in Ho Chi Minh City.</p>
+            </div>
+          )}
+
+          {data && (
+            <>
+              {/* Location Info */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} transition-colors`}>
+                <h2 className="text-lg font-bold leading-tight">{data.location}</h2>
+                <div className="flex gap-2 mt-3">
+                  <span className={`text-xs ${theme.highlight} px-2 py-1 rounded font-medium border`}>
+                    Lat: {data.coords.lat.toFixed(4)}
+                  </span>
+                  <span className={`text-xs ${theme.highlight} px-2 py-1 rounded font-medium border`}>
+                    Lng: {data.coords.lng.toFixed(4)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Weather Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
+                  <div className="flex justify-between items-start">
+                    <span className={`text-xs font-medium ${theme.textSub}`}>TEMP</span>
+                    {getWeatherIcon(data.weather.code)}
+                  </div>
+                  <div>
+                    <div className={`text-2xl font-bold ${getStatusColor(data.weather.temp, 'temp')}`}>{data.weather.temp}°C</div>
+                    <div className={`text-xs ${theme.textSub}`}>Feels {data.weather.feelsLike}°</div>
+                  </div>
+                </div>
+
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
+                  <div className="flex justify-between items-start">
+                    <span className={`text-xs font-medium ${theme.textSub}`}>HUMIDITY</span>
+                    <Droplets className={theme.accentPrimary} size={24} />
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold">{data.weather.humidity}%</div>
+                    <div className={`w-full ${theme.inputBg} h-1.5 rounded-full mt-2 overflow-hidden`}>
+                      <div className={`${isDarkMode ? 'bg-lime-500' : 'bg-lime-600'} h-full rounded-full`} style={{ width: `${data.weather.humidity}%` }}></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Rain */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <CloudRain size={18} className={theme.accentPrimary} />
+                  <span className="font-semibold">Rain</span>
+                </div>
+                <div className="flex items-end gap-2">
+                  <span className={`text-3xl font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain}</span>
+                  <span className={`text-sm ${theme.textSub} mb-1.5`}>mm (current)</span>
+                </div>
+                <div className={`mt-3 ${theme.inputBg} rounded p-2 text-xs flex justify-between items-center border ${theme.inputBorder}`}>
+                    <span className={theme.textSub}>Forecast (Next Hour):</span>
+                    <span className={`font-bold ${data.weather.nextHourProb > 50 ? 'text-orange-500' : 'text-lime-600'}`}>
+                        {data.weather.nextHourProb}% Chance
+                    </span>
+                </div>
+              </div>
+
+              {/* Flood Risk Card (Enhanced) */}
+              <div className={`p-4 rounded-xl shadow-sm border transition-colors ${
+                data.flood.level === 'High' || data.flood.level === 'Critical' 
+                  ? 'bg-red-50 border-red-200' 
+                  : `${theme.cardBg} ${theme.cardBorder}`
+              }`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Activity size={18} className={data.flood.level === 'High' || data.flood.level === 'Critical' ? 'text-red-500' : theme.accentPrimary} />
+                    <span className={`font-semibold ${getStatusColor(data.flood.level, 'flood')}`}>
+                      Flood Risk Estimate
+                    </span>
+                  </div>
+                  <span className={`text-xs font-bold px-2 py-1 rounded uppercase ${
+                    data.flood.level === 'High' || data.flood.level === 'Critical'
+                      ? 'bg-red-100 text-red-700 border border-red-200' 
+                      : isDarkMode 
+                        ? 'bg-blue-900/50 text-blue-200 border border-blue-800' 
+                        : 'bg-lime-100 text-lime-700 border border-lime-200'
+                  }`}>
+                    {data.flood.level}
+                  </span>
+                </div>
+                
+                <div className="space-y-3">
+                  <div>
+                    <div className={`flex justify-between text-xs ${theme.textSub} mb-1`}>
+                      <span>Risk Score</span>
+                      <span>{data.flood.score}/100</span>
+                    </div>
+                    <div className={`w-full ${theme.inputBg} h-2 rounded-full overflow-hidden`}>
+                      <div 
+                        className={`h-full transition-all duration-1000 ${
+                          data.flood.score > 70 ? 'bg-red-500' : 
+                          data.flood.score > 40 ? 'bg-orange-500' : 'bg-lime-500'
+                        }`} 
+                        style={{ width: `${data.flood.score}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                  
+                  {/* Water Levels Update */}
+                  <div className={`flex items-start gap-2 text-xs ${theme.textSub} p-2 ${theme.inputBg} rounded-md border ${theme.inputBorder}`}>
+                    <Waves size={16} className="shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="flex justify-between mb-0.5">
+                        <span>Nearby Canal Levels:</span>
+                        <span className={`font-bold ${getStatusColor(data.flood.canalLevel, 'canal')}`}>
+                          {data.flood.canalLevel}m
+                        </span>
+                      </div>
+                      <span className="opacity-70 text-[10px]">
+                        Factor: Levels &gt; {data.flood.warningThreshold}m within 5km increase risk.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Official Alerts */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Newspaper size={18} className="text-pink-500" />
+                  <span className="font-semibold">Official Alerts & News</span>
+                </div>
+                <div className="space-y-3">
+                    {data.news.map((item, index) => (
+                        <a 
+                          key={index} 
+                          href={item.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className={`block p-3 rounded-lg border text-xs transition-opacity hover:opacity-80 ${
+                            item.type === 'alert' ? 'bg-red-50 border-red-200' : 
+                            item.type === 'warning' ? 'bg-orange-50 border-orange-200' :
+                            `${theme.inputBg} ${theme.inputBorder}`
+                        }`}>
+                            <div className="flex justify-between items-center mb-1">
+                                <span className={`flex items-center font-bold ${
+                                    item.type === 'alert' ? 'text-red-600' : 
+                                    item.type === 'warning' ? 'text-orange-600' : theme.textSub
+                                }`}>
+                                  {item.source} 
+                                  <ExternalLink size={10} className="ml-1 inline opacity-50"/>
+                                </span>
+                                <span className={theme.textSub}>{item.time}</span>
+                            </div>
+                            <p className="leading-relaxed">{item.text}</p>
+                        </a>
+                    ))}
+                </div>
+              </div>
+
+              {/* Tide Information */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Waves size={18} className={theme.accentPrimary} />
+                  <span className="font-semibold">Tide Forecast (Today)</span>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* High Tide Column */}
+                  <div className="flex flex-col gap-2">
+                    <div className={`text-xs font-bold uppercase text-center ${theme.accentPrimary} pb-2 border-b ${theme.cardBorder}`}>
+                      High Tide
+                    </div>
+                    {data.tides.filter(t => t.type === 'High').map((tide, index) => (
+                      <div key={index} className={`${theme.inputBg} p-2 rounded flex flex-col items-center border ${theme.inputBorder}`}>
+                         <span className="font-bold text-sm">{tide.time}</span>
+                         <span className={`text-xs font-bold ${getStatusColor('High', 'tide')}`}>{tide.height}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Low Tide Column */}
+                  <div className="flex flex-col gap-2">
+                    <div className={`text-xs font-bold uppercase text-center ${theme.textSub} pb-2 border-b ${theme.cardBorder}`}>
+                      Low Tide
+                    </div>
+                    {data.tides.filter(t => t.type === 'Low').map((tide, index) => (
+                      <div key={index} className={`${theme.inputBg} p-2 rounded flex flex-col items-center border ${theme.inputBorder}`}>
+                         <span className="font-bold text-sm">{tide.time}</span>
+                         <span className={`text-xs font-bold ${getStatusColor('Low', 'tide')}`}>{tide.height}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Traffic Analysis */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Layers size={18} className="text-orange-500" />
+                  <span className="font-semibold">5km Traffic Analysis</span>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                  <div className={`${theme.inputBg} p-2 rounded-lg border ${theme.inputBorder}`}>
+                    <div className={`text-xs ${theme.textSub} uppercase`}>Status</div>
+                    <div className={`font-bold text-sm ${getStatusColor(data.traffic.status, 'traffic')}`}>{data.traffic.status}</div>
+                  </div>
+                  <div className={`${theme.inputBg} p-2 rounded-lg border ${theme.inputBorder}`}>
+                    <div className={`text-xs ${theme.textSub} uppercase`}>Avg Speed</div>
+                    <div className="font-bold text-sm">{data.traffic.avgSpeed.toFixed(0)} km/h</div>
+                  </div>
+                  <div className={`${theme.inputBg} p-2 rounded-lg border ${theme.inputBorder}`}>
+                    <div className={`text-xs ${theme.textSub} uppercase`}>Incidents</div>
+                    <div className="font-bold text-sm">{data.traffic.incidents}</div>
+                  </div>
+                </div>
+                <div className={`text-[10px] ${theme.textSub} italic text-center`}>
+                  * Traffic data is simulated for demo purposes.
+                </div>
+              </div>
+
+            </>
+          )}
+
+        </div>
+
+        {/* Right Panel: Map */}
+        <div className={`lg:col-span-2 h-[500px] lg:h-auto ${theme.inputBg} rounded-xl shadow-inner border ${theme.cardBorder} relative overflow-hidden`}>
+          <div id="map" ref={mapRef} className="w-full h-full" />
+          
+          {/* Map Legend */}
+          <div className={`absolute bottom-4 right-4 ${isDarkMode ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur p-3 rounded-lg shadow-lg text-xs z-[400] border ${theme.cardBorder}`}>
+             <h4 className="font-bold mb-2">Legend</h4>
+             <div className="flex items-center gap-2 mb-1">
+               <div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm"></div>
+               <span className={theme.textSub}>Target Location</span>
+             </div>
+             <div className="flex items-center gap-2">
+               <div className={`w-3 h-3 rounded-full ${isDarkMode ? 'bg-blue-500' : 'bg-lime-600'} opacity-20 border ${isDarkMode ? 'border-blue-500' : 'border-lime-600'}`}></div>
+               <span className={theme.textSub}>5km Radius Zone</span>
+             </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  );
+}
