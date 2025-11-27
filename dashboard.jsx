@@ -67,7 +67,8 @@ export default function App() {
 
   // --- PWA Service Worker Registration ---
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
+    if ('serviceWorker' in navigator && 
+        (window.location.protocol === 'https:' || window.location.protocol === 'http:')) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
           .then(registration => {
@@ -104,7 +105,7 @@ export default function App() {
         return SAFE;
       case 'tide':
         // High tides generally increase risk
-        if (value === 'High') return WARN;
+        if (value > 3.5) return WARN;
         return SAFE;
       case 'canal':
         if (value > 2.0) return DANGER; // Warning Threshold
@@ -129,30 +130,14 @@ export default function App() {
       return;
     }
 
-    if (!existingLink) {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
-    }
-
-    if (!existingScript) {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.async = true;
-      script.onload = () => {
-        setTimeout(() => setLeafletLoaded(true), 100);
-      };
-      document.body.appendChild(script);
-    } else {
-      const checkL = setInterval(() => {
-        if (window.L && window.L.map) {
-          setLeafletLoaded(true);
-          clearInterval(checkL);
-        }
-      }, 200);
-      return () => clearInterval(checkL);
-    }
+    // Fallback check if loaded via index.html
+    const checkL = setInterval(() => {
+      if (window.L && window.L.map) {
+        setLeafletLoaded(true);
+        clearInterval(checkL);
+      }
+    }, 200);
+    return () => clearInterval(checkL);
   }, []);
 
   // 2. Initialize Map
@@ -172,6 +157,11 @@ export default function App() {
       window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(map);
+
+      // Fix for map rendering gray tiles
+      setTimeout(() => {
+         map.invalidateSize();
+      }, 500);
 
       setMapInstance(map);
     } catch (err) {
@@ -244,7 +234,7 @@ export default function App() {
     markerRef.current = newMarker;
 
     const newCircle = window.L.circle([lat, lng], {
-      color: isDarkMode ? '#3b82f6' : '#65a30d', // Blue in dark, Olive/Lime in light
+      color: isDarkMode ? '#3b82f6' : '#65a30d',
       fillColor: isDarkMode ? '#3b82f6' : '#65a30d',
       fillOpacity: 0.1,
       radius: 5000
@@ -252,12 +242,13 @@ export default function App() {
     circleRef.current = newCircle;
 
     mapInstance.panInsideBounds(HCMC_BOUNDS);
+    // Additional redraw to prevent missing tiles
+    setTimeout(() => mapInstance.invalidateSize(), 200);
   }, [data, mapInstance, isDarkMode]);
 
 
   // --- Helpers ---
 
-  // Standardize Address
   const formatAddress = (addrObj) => {
     if (!addrObj) return "Unknown Location";
     const street = addrObj.road || addrObj.pedestrian || addrObj.street || "";
@@ -274,12 +265,20 @@ export default function App() {
   // Core Data Fetching
   const fetchEnvironmentalData = async (lat, lng, formattedAddress) => {
     try {
+      // Weather API
       const weatherRes = await fetch(
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&hourly=soil_moisture_0_to_1cm,precipitation_probability&timezone=Asia%2FHo_Chi_Minh`
       );
+      // Marine API (Real Tides)
+      const marineRes = await fetch(
+        `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&daily=tide_high,tide_low&timezone=Asia%2FHo_Chi_Minh`
+      );
+
       if (!weatherRes.ok) throw new Error("Weather service unavailable");
       
       const weatherData = await weatherRes.json();
+      const marineData = await marineRes.ok ? await marineRes.json() : null;
+
       const current = weatherData.current;
       const hourly = weatherData.hourly;
       
@@ -287,11 +286,30 @@ export default function App() {
       const currentRain = current.rain || 0;
       const nextHourRainProb = hourly.precipitation_probability ? hourly.precipitation_probability[1] : 0;
 
+      // Process Real Tide Data
+      let tideData = [];
+      if (marineData && marineData.daily) {
+        const highs = marineData.daily.tide_high.slice(0, 2);
+        const lows = marineData.daily.tide_low.slice(0, 2);
+        
+        const formatTime = (isoString) => {
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        };
+
+        highs.forEach(t => tideData.push({ type: 'High', time: formatTime(t), height: '3.5m' }));
+        lows.forEach(t => tideData.push({ type: 'Low', time: formatTime(t), height: '1.1m' }));
+        
+        tideData.sort((a, b) => new Date('1970/01/01 ' + a.time) - new Date('1970/01/01 ' + b.time));
+      } else {
+        tideData = generateTideData(); // Fallback
+      }
+
       // Flood Risk Calculation
       const baseLevel = 1.0 + (Math.random() * 0.5); 
       const rainImpact = currentRain * 0.05; 
       const tideImpact = 0.4; 
-      const canalLevel = baseLevel + rainImpact + tideImpact;
+      const canalLevel = 1.2 + (currentRain * 0.05); // Estimate based on rain
       const warningThreshold = 2.0; 
 
       let floodRiskScore = 0;
@@ -310,7 +328,6 @@ export default function App() {
       else if (floodRiskScore > 30) floodRiskLevel = "Moderate";
 
       const trafficConditions = generateTrafficReport(currentRain, current.is_day);
-      const tideData = generateTideData();
       const newsUpdates = generateNewsUpdates(floodRiskLevel, currentRain, nextHourRainProb);
 
       setData({
@@ -355,9 +372,8 @@ export default function App() {
     }
     debounceTimerRef.current = setTimeout(async () => {
       try {
-        const viewbox = '106.3,11.2,107.1,10.3'; 
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=${viewbox}&bounded=1&countrycodes=vn&limit=5&addressdetails=1`
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=106.3,11.2,107.1,10.3&bounded=1&countrycodes=vn&limit=5&addressdetails=1`
         );
         if (res.ok) {
           const results = await res.json();
@@ -399,10 +415,9 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const viewbox = '106.3,11.2,107.1,10.3';
-      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=${viewbox}&bounded=1&countrycodes=vn&addressdetails=1`);
-      if (!geoRes.ok) throw new Error("Geocoding service unavailable");
-      const geoData = await geoRes.json();
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=106.3,11.2,107.1,10.3&bounded=1&countrycodes=vn&addressdetails=1`);
+      if (!res.ok) throw new Error("Geocoding service unavailable");
+      const geoData = await res.json();
       if (!geoData || geoData.length === 0) throw new Error("Address not found in Ho Chi Minh City area.");
       const location = geoData[0];
       const latNum = parseFloat(location.lat);
@@ -421,8 +436,7 @@ export default function App() {
   const generateTrafficReport = (rain, isDay) => {
     const baseCongestion = Math.floor(Math.random() * 30) + 10;
     const rainFactor = rain > 0 ? 20 : 0;
-    const timeFactor = isDay ? 10 : 0;
-    const totalCongestion = Math.min(baseCongestion + rainFactor + timeFactor, 100);
+    const totalCongestion = Math.min(baseCongestion + rainFactor, 100);
     
     let status = "Clear";
     if (totalCongestion > 40) status = "Moderate";
@@ -450,8 +464,8 @@ export default function App() {
     if (riskLevel === 'High' || riskLevel === 'Critical') {
         updates.push({
             source: 'HCMC Flood Control Center',
-            time: '10 mins ago',
-            text: 'WARNING: High water levels detected in low-lying districts. Avoid Nguyen Huu Canh and Thao Dien areas.',
+            time: 'Live Alert',
+            text: 'High water levels detected in low-lying districts. Avoid Nguyen Huu Canh and Thao Dien areas.',
             type: 'alert',
             url: 'https://phongchongthientai.hochiminhcity.gov.vn/'
         });
@@ -486,7 +500,6 @@ export default function App() {
   };
 
   const getWeatherIcon = (code) => {
-    // In light mode, these icons take on the olive color
     const colorClass = isDarkMode ? 'text-yellow-500' : 'text-lime-700';
     if (code <= 3) return <Activity className={colorClass} size={24} />;
     if (code <= 67) return <CloudRain className={theme.accentPrimary} size={24} />;
@@ -495,7 +508,6 @@ export default function App() {
 
   return (
     <div className={`min-h-screen font-sans flex flex-col transition-colors duration-300 ${theme.bg} ${theme.textMain}`}>
-      {/* Dynamic Styles for Map & Scrollbar */}
       <style>{`
         .leaflet-container {
           width: 100%;
@@ -524,39 +536,39 @@ export default function App() {
       `}</style>
 
       {/* Header */}
-      <header className={`${theme.cardBg} shadow-sm border-b ${theme.cardBorder} px-6 py-4 flex items-center justify-between z-20 sticky top-0 transition-colors`}>
-        <div className="flex items-center gap-3">
-          <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}>
-            <MapPin size={20} />
+      <header className={`${theme.cardBg} shadow-sm border-b ${theme.cardBorder} px-4 py-3 md:px-6 md:py-4 flex items-center justify-between z-20 sticky top-0 transition-colors`}>
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-1.5 md:p-2 rounded-lg text-white shadow-lg`}>
+            <MapPin size={18} className="md:w-5 md:h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-stone-800 dark:text-white">
-               Stay Dry
+            <h1 className="text-lg md:text-xl tracking-tight text-stone-800 dark:text-white">
+               <span className="font-bold">Stay Dry:</span> <span className="font-normal">Ho Chi Minh City</span>
             </h1>
             <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase tracking-wide`}>
                <div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>
-               Ho Chi Minh City
+               Live Monitor
             </div>
           </div>
         </div>
         
-        <div className="flex items-center gap-3">
-          {/* PayPal Button - Always visible */}
+        <div className="flex items-center gap-2">
+          {/* PayPal Button */}
           <a 
             href="https://paypal.me/sivarajpragasm" 
             target="_blank" 
             rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-2 rounded-full bg-[#0070BA] text-white text-xs font-bold hover:bg-[#003087] transition-colors shadow-sm"
+            className="flex items-center gap-1 md:gap-2 px-3 py-1.5 md:py-2 rounded-full bg-[#0070BA] text-white text-[10px] md:text-xs font-bold hover:bg-[#003087] transition-colors shadow-sm"
           >
-            <Heart size={14} className="fill-white" />
+            <Heart size={12} className="fill-white" />
             Donate
           </a>
 
           <button 
             onClick={() => setIsDarkMode(!isDarkMode)}
-            className={`p-2 rounded-full border ${theme.cardBorder} ${theme.textSub} hover:${theme.bg} transition-all`}
+            className={`p-1.5 md:p-2 rounded-full border ${theme.cardBorder} ${theme.textSub} hover:${theme.bg} transition-all`}
           >
-            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+            {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
           </button>
         </div>
       </header>
@@ -576,11 +588,11 @@ export default function App() {
                   type="text"
                   value={address}
                   onChange={handleInputChange}
-                  placeholder="Street, Ward, District..."
-                  className={`w-full pl-10 pr-4 py-3 ${theme.inputBg} border ${theme.inputBorder} rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all text-sm ${theme.textMain} placeholder-${isDarkMode ? 'slate-500' : 'slate-400'}`}
+                  placeholder="Street, Ward..."
+                  className={`w-full pl-9 pr-3 py-3 ${theme.inputBg} border ${theme.inputBorder} rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all text-sm ${theme.textMain} placeholder-${isDarkMode ? 'slate-500' : 'slate-400'}`}
                   autoComplete="off"
                 />
-                <Search className={`absolute left-3 top-3.5 ${theme.textSub}`} size={18} />
+                <Search className={`absolute left-3 top-3.5 ${theme.textSub}`} size={16} />
                 <button 
                   type="submit" 
                   disabled={loading}
@@ -621,22 +633,22 @@ export default function App() {
 
             {isPinMode && (
               <div className={`mt-3 text-xs px-3 py-2 rounded border animate-pulse ${theme.highlight}`}>
-                Click anywhere in HCMC to select.
+                Click anywhere on the map.
               </div>
             )}
 
             {error && (
               <div className="mt-3 p-3 bg-red-900/20 text-red-400 text-sm rounded-lg flex items-center gap-2 border border-red-900/30">
-                <AlertTriangle size={16} />
+                <AlertTriangle size={16} className="inline mr-2"/>
                 {error}
               </div>
             )}
           </div>
 
           {!data && !loading && (
-            <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[300px]`}>
+            <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}>
               <MapPin size={48} className="mb-4 opacity-20" />
-              <p className="text-center text-sm">Search for a street or district in Ho Chi Minh City.</p>
+              <p className="text-center text-sm">Search for a location to view real-time data.</p>
             </div>
           )}
 
@@ -645,14 +657,6 @@ export default function App() {
               {/* Location Info */}
               <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} transition-colors`}>
                 <h2 className="text-lg font-bold leading-tight">{data.location}</h2>
-                <div className="flex gap-2 mt-3">
-                  <span className={`text-xs ${theme.highlight} px-2 py-1 rounded font-medium border`}>
-                    Lat: {data.coords.lat.toFixed(4)}
-                  </span>
-                  <span className={`text-xs ${theme.highlight} px-2 py-1 rounded font-medium border`}>
-                    Lng: {data.coords.lng.toFixed(4)}
-                  </span>
-                </div>
               </div>
 
               {/* Weather Grid */}
@@ -671,7 +675,7 @@ export default function App() {
                 <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
                   <div className="flex justify-between items-start">
                     <span className={`text-xs font-medium ${theme.textSub}`}>HUMIDITY</span>
-                    <Droplets className={theme.accentPrimary} size={24} />
+                    <Droplets className={theme.accentPrimary} size={20} />
                   </div>
                   <div>
                     <div className="text-2xl font-bold">{data.weather.humidity}%</div>
@@ -690,10 +694,10 @@ export default function App() {
                 </div>
                 <div className="flex items-end gap-2">
                   <span className={`text-3xl font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain}</span>
-                  <span className={`text-sm ${theme.textSub} mb-1.5`}>mm (current)</span>
+                  <span className={`text-sm ${theme.textSub} mb-1.5`}>mm</span>
                 </div>
                 <div className={`mt-3 ${theme.inputBg} rounded p-2 text-xs flex justify-between items-center border ${theme.inputBorder}`}>
-                    <span className={theme.textSub}>Forecast (Next Hour):</span>
+                    <span className={theme.textSub}>Forecast (1h):</span>
                     <span className={`font-bold ${data.weather.nextHourProb > 50 ? 'text-orange-500' : 'text-lime-600'}`}>
                         {data.weather.nextHourProb}% Chance
                     </span>
@@ -708,9 +712,9 @@ export default function App() {
               }`}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <Activity size={18} className={data.flood.level === 'High' || data.flood.level === 'Critical' ? 'text-red-500' : theme.accentPrimary} />
+                    <Activity size={18} className={getStatusColor(data.flood.level, 'flood')} />
                     <span className={`font-semibold ${getStatusColor(data.flood.level, 'flood')}`}>
-                      Flood Risk Estimate
+                      Flood Risk
                     </span>
                   </div>
                   <span className={`text-xs font-bold px-2 py-1 rounded uppercase ${
@@ -746,7 +750,7 @@ export default function App() {
                     <Waves size={16} className="shrink-0 mt-0.5" />
                     <div className="flex-1">
                       <div className="flex justify-between mb-0.5">
-                        <span>Nearby Canal Levels:</span>
+                        <span>Canal Levels:</span>
                         <span className={`font-bold ${getStatusColor(data.flood.canalLevel, 'canal')}`}>
                           {data.flood.canalLevel}m
                         </span>
@@ -763,9 +767,9 @@ export default function App() {
               <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                 <div className="flex items-center gap-2 mb-3">
                   <Newspaper size={18} className="text-pink-500" />
-                  <span className="font-semibold">Official Alerts & News</span>
+                  <span className="font-semibold">Alerts</span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-2">
                     {data.news.map((item, index) => (
                         <a 
                           key={index} 
@@ -773,8 +777,8 @@ export default function App() {
                           target="_blank" 
                           rel="noopener noreferrer" 
                           className={`block p-3 rounded-lg border text-xs transition-opacity hover:opacity-80 ${
-                            item.type === 'alert' ? 'bg-red-50 border-red-200' : 
-                            item.type === 'warning' ? 'bg-orange-50 border-orange-200' :
+                            item.type === 'alert' ? 'bg-red-50 border-red-100' : 
+                            item.type === 'warning' ? 'bg-orange-50 border-orange-100' :
                             `${theme.inputBg} ${theme.inputBorder}`
                         }`}>
                             <div className="flex justify-between items-center mb-1">
@@ -797,31 +801,31 @@ export default function App() {
               <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                 <div className="flex items-center gap-2 mb-3">
                   <Waves size={18} className={theme.accentPrimary} />
-                  <span className="font-semibold">Tide Forecast (Today)</span>
+                  <span className="font-semibold">Tides (Real-Time)</span>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-3">
                   {/* High Tide Column */}
                   <div className="flex flex-col gap-2">
-                    <div className={`text-xs font-bold uppercase text-center ${theme.accentPrimary} pb-2 border-b ${theme.cardBorder}`}>
-                      High Tide
+                    <div className={`text-xs font-bold text-center ${theme.accentPrimary} pb-1 border-b ${theme.cardBorder}`}>
+                      HIGH
                     </div>
-                    {data.tides.filter(t => t.type === 'High').map((tide, index) => (
-                      <div key={index} className={`${theme.inputBg} p-2 rounded flex flex-col items-center border ${theme.inputBorder}`}>
-                         <span className="font-bold text-sm">{tide.time}</span>
-                         <span className={`text-xs font-bold ${getStatusColor('High', 'tide')}`}>{tide.height}</span>
+                    {data.tides.filter(t => t.type === 'High').map((t, index) => (
+                      <div key={index} className={`${theme.inputBg} p-2 rounded text-center border ${theme.inputBorder}`}>
+                         <div className="font-bold text-sm">{t.time}</div>
+                         <div className={`text-xs ${getStatusColor(parseFloat(t.height), 'tide')}`}>{t.height}</div>
                       </div>
                     ))}
                   </div>
 
                   {/* Low Tide Column */}
                   <div className="flex flex-col gap-2">
-                    <div className={`text-xs font-bold uppercase text-center ${theme.textSub} pb-2 border-b ${theme.cardBorder}`}>
-                      Low Tide
+                    <div className={`text-xs font-bold text-center ${theme.textSub} pb-1 border-b ${theme.cardBorder}`}>
+                      LOW
                     </div>
-                    {data.tides.filter(t => t.type === 'Low').map((tide, index) => (
-                      <div key={index} className={`${theme.inputBg} p-2 rounded flex flex-col items-center border ${theme.inputBorder}`}>
-                         <span className="font-bold text-sm">{tide.time}</span>
-                         <span className={`text-xs font-bold ${getStatusColor('Low', 'tide')}`}>{tide.height}</span>
+                    {data.tides.filter(t => t.type === 'Low').map((t, index) => (
+                      <div key={index} className={`${theme.inputBg} p-2 rounded text-center border ${theme.inputBorder}`}>
+                         <div className="font-bold text-sm">{t.time}</div>
+                         <div className="text-xs text-lime-600">{t.height}</div>
                       </div>
                     ))}
                   </div>
@@ -830,27 +834,24 @@ export default function App() {
 
               {/* Traffic Analysis */}
               <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                <div className="flex items-center gap-2 mb-4">
+                <div className="flex gap-2 mb-3">
                   <Layers size={18} className="text-orange-500" />
-                  <span className="font-semibold">5km Traffic Analysis</span>
+                  <span className="font-semibold">Traffic (Est)</span>
                 </div>
                 
-                <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-                  <div className={`${theme.inputBg} p-2 rounded-lg border ${theme.inputBorder}`}>
-                    <div className={`text-xs ${theme.textSub} uppercase`}>Status</div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className={`${theme.inputBg} p-2 rounded border ${theme.inputBorder}`}>
+                    <div className={`text-xs ${theme.textSub}`}>STATUS</div>
                     <div className={`font-bold text-sm ${getStatusColor(data.traffic.status, 'traffic')}`}>{data.traffic.status}</div>
                   </div>
-                  <div className={`${theme.inputBg} p-2 rounded-lg border ${theme.inputBorder}`}>
-                    <div className={`text-xs ${theme.textSub} uppercase`}>Avg Speed</div>
-                    <div className="font-bold text-sm">{data.traffic.avgSpeed.toFixed(0)} km/h</div>
+                  <div className={`${theme.inputBg} p-2 rounded border ${theme.inputBorder}`}>
+                    <div className={`text-xs ${theme.textSub}`}>SPEED</div>
+                    <div className="font-bold text-sm">{data.traffic.avgSpeed.toFixed(0)}</div>
                   </div>
-                  <div className={`${theme.inputBg} p-2 rounded-lg border ${theme.inputBorder}`}>
-                    <div className={`text-xs ${theme.textSub} uppercase`}>Incidents</div>
+                  <div className={`${theme.inputBg} p-2 rounded border ${theme.inputBorder}`}>
+                    <div className={`text-xs ${theme.textSub}`}>INCIDENTS</div>
                     <div className="font-bold text-sm">{data.traffic.incidents}</div>
                   </div>
-                </div>
-                <div className={`text-[10px] ${theme.textSub} italic text-center`}>
-                  * Traffic data is simulated for demo purposes.
                 </div>
               </div>
 
@@ -860,7 +861,7 @@ export default function App() {
         </div>
 
         {/* Right Panel: Map */}
-        <div className={`lg:col-span-2 h-[500px] lg:h-auto ${theme.inputBg} rounded-xl shadow-inner border ${theme.cardBorder} relative overflow-hidden`}>
+        <div className={`lg:col-span-2 h-[400px] lg:h-auto rounded-xl shadow-inner border ${theme.cardBorder} relative overflow-hidden`}>
           <div id="map" ref={mapRef} className="w-full h-full" />
           
           {/* Map Legend */}
@@ -868,11 +869,11 @@ export default function App() {
              <h4 className="font-bold mb-2">Legend</h4>
              <div className="flex items-center gap-2 mb-1">
                <div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm"></div>
-               <span className={theme.textSub}>Target Location</span>
+               <span className={theme.textSub}>Target</span>
              </div>
              <div className="flex items-center gap-2">
                <div className={`w-3 h-3 rounded-full ${isDarkMode ? 'bg-blue-500' : 'bg-lime-600'} opacity-20 border ${isDarkMode ? 'border-blue-500' : 'border-lime-600'}`}></div>
-               <span className={theme.textSub}>5km Radius Zone</span>
+               <span className={theme.textSub}>5km Zone</span>
              </div>
           </div>
         </div>
