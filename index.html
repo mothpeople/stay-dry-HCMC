@@ -506,6 +506,14 @@
           return updates;
         };
 
+        const getWeatherIcon = (code) => {
+          // In light mode, these icons take on the olive color
+          const colorClass = isDarkMode ? 'text-yellow-500' : 'text-lime-700';
+          if (code <= 3) return <Activity className={colorClass} size={24} />;
+          if (code <= 67) return <CloudRain className={theme.accentPrimary} size={24} />;
+          return <AlertTriangle className={theme.textSub} size={24} />;
+        };
+
         return (
           <div className={`min-h-screen font-sans flex flex-col transition-colors duration-300 ${theme.bg} ${theme.textMain}`}>
             {/* Dynamic Styles for Map & Scrollbar */}
@@ -543,7 +551,7 @@
                   <MapPin size={20} />
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold tracking-tight text-stone-800 dark:text-white">
+                  <h1 className={`text-xl font-bold tracking-tight ${theme.textMain}`}>
                      Stay Dry
                   </h1>
                   <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase tracking-wide`}>
@@ -554,7 +562,7 @@
               </div>
               
               <div className="flex items-center gap-3">
-                {/* PayPal Button */}
+                {/* PayPal Button - Always visible */}
                 <a 
                   href="https://paypal.me/sivarajpragasm" 
                   target="_blank" 
