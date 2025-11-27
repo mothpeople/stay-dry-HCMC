@@ -10,107 +10,98 @@
     <meta name="theme-color" content="#f7fee7">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1163/1163624.png">
+    
+    <!-- Links to your local logo files -->
+    <link rel="apple-touch-icon" href="/apple-icon.png">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
 
-    <!-- Tailwind CSS (for styling) -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
-    <!-- Babel (to compile JSX in browser) -->
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Leaflet CSS -->
+    <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body class="bg-lime-50">
     <div id="root"></div>
 
-    <!-- Inlined React App Logic (Fixes 'Invalid URL' error) -->
+    <!-- Inlined React App Logic -->
     <script type="text/babel">
       const { useState, useEffect, useRef } = React;
-      // Lucide icons via CDN wrapper/mock since we can't import directly in standalone
-      // We use a simple mapping or svg replacement for this standalone version
-      // For simplicity in this specific fix, we will assume lucide is available or mock the Icons if imports fail.
-      // However, standard React inline doesn't support 'import' statements. 
-      // We will use a global Lucide object if available, or specific SVG implementations.
-      // TO MAKE THIS RUNNABLE WITHOUT BUILD STEP, WE WILL USE UNPKG for Lucide
-      
-      // Define Icons manually or assume lucide global if loaded. 
-      // Since we didn't load lucide script in head, let's add it dynamically or replace icons.
-      // Better approach: Add Lucide script to head dynamically or assume the user adds it.
-      // I will add the lucide script to the head below.
+
+      // --- Icons ---
+      const Icon = ({ d, className, fill = "none" }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+          {d}
+        </svg>
+      );
+
+      const MapPin = ({ className }) => <Icon className={className} d={<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></>} />;
+      const Search = ({ className }) => <Icon className={className} d={<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>} />;
+      const Navigation = ({ className }) => <Icon className={className} d={<polygon points="3 11 22 2 13 21 11 13 3 11"/>} />;
+      const Crosshair = ({ className }) => <Icon className={className} d={<><circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/></>} />;
+      const AlertTriangle = ({ className }) => <Icon className={className} d={<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></>} />;
+      const Activity = ({ className }) => <Icon className={className} d={<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>} />;
+      const Droplets = ({ className }) => <Icon className={className} d={<><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.8-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.35"/></>} />;
+      const CloudRain = ({ className }) => <Icon className={className} d={<><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></>} />;
+      const Layers = ({ className }) => <Icon className={className} d={<><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>} />;
+      const Waves = ({ className }) => <Icon className={className} d={<><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></>} />;
+      const Newspaper = ({ className }) => <Icon className={className} d={<><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></>} />;
+      const Sun = ({ className }) => <Icon className={className} d={<><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41-1.41"/><path d="m19.07 4.93-1.41 1.41"/></>} />;
+      const Moon = ({ className }) => <Icon className={className} d={<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>} />;
+      const Heart = ({ className }) => <Icon className={className} d={<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>} fill="currentColor" />;
+      const ExternalLink = ({ className }) => <Icon className={className} d={<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>} />;
+
+      // --- Constants ---
+      const HCMC_CENTER = [10.7769, 106.7009];
+      const HCMC_BOUNDS = [
+        [10.3500, 106.3000],
+        [11.1600, 107.0200] 
+      ];
+
+      const THEMES = {
+        dark: {
+          name: 'dark',
+          bg: 'bg-slate-950',
+          textMain: 'text-slate-100',
+          textSub: 'text-slate-400',
+          cardBg: 'bg-slate-900',
+          cardBorder: 'border-slate-800',
+          inputBg: 'bg-slate-800',
+          inputBorder: 'border-slate-700',
+          accentPrimary: 'text-blue-400', 
+          accentSecondary: 'text-lime-400',
+          buttonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white',
+          buttonSecondary: 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750',
+          highlight: 'bg-blue-900/30 text-blue-300 border-blue-800/50',
+          mapFilter: 'brightness(0.8) contrast(1.2)'
+        },
+        light: {
+          name: 'light',
+          bg: 'bg-lime-50',
+          textMain: 'text-stone-800',
+          textSub: 'text-stone-500',
+          cardBg: 'bg-white',
+          cardBorder: 'border-lime-100',
+          inputBg: 'bg-stone-50',
+          inputBorder: 'border-stone-200',
+          accentPrimary: 'text-lime-700', 
+          accentSecondary: 'text-lime-600',
+          buttonPrimary: 'bg-lime-700 hover:bg-lime-800 text-white',
+          buttonSecondary: 'bg-white border-lime-200 text-lime-700 hover:bg-lime-50',
+          highlight: 'bg-lime-100 text-lime-800 border-lime-200',
+          mapFilter: 'none'
+        }
+      };
 
       const App = () => {
-        // --- MOCKED ICONS (To ensure it runs without complex build steps) ---
-        // In a real build, these would be imports. Here we render simple SVGs.
-        const IconWrapper = ({ children, className }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                {children}
-            </svg>
-        );
-        const MapPin = ({size, className}) => <IconWrapper className={className}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></IconWrapper>;
-        const Search = ({size, className}) => <IconWrapper className={className}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></IconWrapper>;
-        const Navigation = ({size, className}) => <IconWrapper className={className}><polygon points="3 11 22 2 13 21 11 13 3 11"/></IconWrapper>;
-        const Crosshair = ({size, className}) => <IconWrapper className={className}><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></IconWrapper>;
-        const AlertTriangle = ({size, className}) => <IconWrapper className={className}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></IconWrapper>;
-        const Droplets = ({size, className}) => <IconWrapper className={className}><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.8-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.35"/></IconWrapper>;
-        const CloudRain = ({size, className}) => <IconWrapper className={className}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></IconWrapper>;
-        const Activity = ({size, className}) => <IconWrapper className={className}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></IconWrapper>;
-        const Layers = ({size, className}) => <IconWrapper className={className}><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></IconWrapper>;
-        const Waves = ({size, className}) => <IconWrapper className={className}><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></IconWrapper>;
-        const Newspaper = ({size, className}) => <IconWrapper className={className}><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></IconWrapper>;
-        const Sun = ({size, className}) => <IconWrapper className={className}><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41-1.41"/><path d="m19.07 4.93-1.41 1.41"/></IconWrapper>;
-        const Moon = ({size, className}) => <IconWrapper className={className}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></IconWrapper>;
-        const Heart = ({size, className}) => <IconWrapper className={className}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></IconWrapper>;
-        const ExternalLink = ({size, className}) => <IconWrapper className={className}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></IconWrapper>;
-
-        // Constants
-        const HCMC_CENTER = [10.7769, 106.7009];
-        const HCMC_BOUNDS = [
-          [10.3500, 106.3000],
-          [11.1600, 107.0200] 
-        ];
-
-        const THEMES = {
-          dark: {
-            name: 'dark',
-            bg: 'bg-slate-950',
-            textMain: 'text-slate-100',
-            textSub: 'text-slate-400',
-            cardBg: 'bg-slate-900',
-            cardBorder: 'border-slate-800',
-            inputBg: 'bg-slate-800',
-            inputBorder: 'border-slate-700',
-            accentPrimary: 'text-blue-400',
-            accentSecondary: 'text-lime-400',
-            buttonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white',
-            buttonSecondary: 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750',
-            highlight: 'bg-blue-900/30 text-blue-300 border-blue-800/50',
-            mapFilter: 'brightness(0.8) contrast(1.2)'
-          },
-          light: {
-            name: 'light',
-            bg: 'bg-lime-50',
-            textMain: 'text-stone-800',
-            textSub: 'text-stone-500',
-            cardBg: 'bg-white',
-            cardBorder: 'border-lime-100',
-            inputBg: 'bg-stone-50',
-            inputBorder: 'border-stone-200',
-            accentPrimary: 'text-lime-700',
-            accentSecondary: 'text-lime-600',
-            buttonPrimary: 'bg-lime-700 hover:bg-lime-800 text-white',
-            buttonSecondary: 'bg-white border-lime-200 text-lime-700 hover:bg-lime-50',
-            highlight: 'bg-lime-100 text-lime-800 border-lime-200',
-            mapFilter: 'none'
-          }
-        };
-
-        // --- Main Component Logic ---
-        // State
         const [address, setAddress] = useState('');
         const [isDarkMode, setIsDarkMode] = useState(false); 
         const [suggestions, setSuggestions] = useState([]); 
@@ -123,24 +114,23 @@
         const [isPinMode, setIsPinMode] = useState(false);
         
         const theme = isDarkMode ? THEMES.dark : THEMES.light;
-
-        // Refs
         const mapRef = useRef(null);
         const markerRef = useRef(null);
         const circleRef = useRef(null);
         const debounceTimerRef = useRef(null); 
 
-        // PWA Registration inside React (Safe check)
+        // Service Worker Registration
         useEffect(() => {
           if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
             window.addEventListener('load', () => {
               navigator.serviceWorker.register('/service-worker.js')
                 .then(reg => console.log('SW registered'))
-                .catch(err => console.log('SW failed (likely preview env)', err));
+                .catch(err => console.log('SW failed', err));
             });
           }
         }, []);
 
+        // Helper for Safety Color Coding
         const getStatusColor = (value, type) => {
           if (isDarkMode) return 'text-slate-100';
           const SAFE = 'text-lime-600';
@@ -176,6 +166,7 @@
           }
         };
 
+        // Map Initialization
         useEffect(() => {
           const checkL = setInterval(() => {
             if (window.L && window.L.map) {
@@ -216,6 +207,7 @@
           };
         }, [leafletLoaded]);
 
+        // Map Click
         useEffect(() => {
           if (!mapInstance) return;
 
@@ -238,12 +230,9 @@
             try {
               const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
               const data = await res.json();
-              
               const formattedAddr = formatAddress(data.address);
               setAddress(formattedAddr); 
-              
               await fetchEnvironmentalData(lat, lng, formattedAddr);
-
             } catch (err) {
               setError("Failed to retrieve location data.");
               setLoading(false);
@@ -258,6 +247,7 @@
           return () => mapInstance.off('click', handleMapClick);
         }, [mapInstance, isPinMode]);
 
+        // Update Markers
         useEffect(() => {
           if (!mapInstance || !data || !window.L) return;
 
@@ -367,7 +357,6 @@
         const handleInputChange = (e) => {
           const value = e.target.value;
           setAddress(value);
-          
           if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
           if (!value.trim()) {
             setSuggestions([]);
@@ -398,7 +387,6 @@
           setSuggestions([]); 
           setLoading(true);
           setError(null);
-
           try {
              const latNum = parseFloat(suggestion.lat);
              const lonNum = parseFloat(suggestion.lon);
@@ -444,11 +432,9 @@
           const rainFactor = rain > 0 ? 20 : 0;
           const timeFactor = isDay ? 10 : 0;
           const totalCongestion = Math.min(baseCongestion + rainFactor + timeFactor, 100);
-          
           let status = "Clear";
           if (totalCongestion > 40) status = "Moderate";
           if (totalCongestion > 70) status = "Heavy";
-
           return {
             congestion: totalCongestion,
             status: status,
@@ -507,48 +493,19 @@
         };
 
         const getWeatherIcon = (code) => {
-          // In light mode, these icons take on the olive color
           const colorClass = isDarkMode ? 'text-yellow-500' : 'text-lime-700';
-          if (code <= 3) return <Activity className={colorClass} size={24} />;
-          if (code <= 67) return <CloudRain className={theme.accentPrimary} size={24} />;
-          return <AlertTriangle className={theme.textSub} size={24} />;
+          if (code <= 3) return <Activity className={colorClass} />;
+          if (code <= 67) return <CloudRain className={theme.accentPrimary} />;
+          return <AlertTriangle className={theme.textSub} />;
         };
 
         return (
           <div className={`min-h-screen font-sans flex flex-col transition-colors duration-300 ${theme.bg} ${theme.textMain}`}>
-            {/* Dynamic Styles for Map & Scrollbar */}
-            <style>{`
-              .leaflet-container {
-                width: 100%;
-                height: 100%;
-                border-radius: 0.5rem;
-                z-index: 10;
-                filter: ${theme.mapFilter}; 
-                transition: filter 0.5s ease;
-              }
-              ::-webkit-scrollbar {
-                width: 8px;
-              }
-              ::-webkit-scrollbar-track {
-                background: ${isDarkMode ? '#0f172a' : '#f5f5f4'}; 
-              }
-              ::-webkit-scrollbar-thumb {
-                background: ${isDarkMode ? '#334155' : '#cbd5e1'}; 
-                border-radius: 4px;
-              }
-              ::-webkit-scrollbar-thumb:hover {
-                background: ${isDarkMode ? '#475569' : '#94a3b8'}; 
-              }
-              .cursor-crosshair {
-                cursor: crosshair !important;
-              }
-            `}</style>
-
             {/* Header */}
             <header className={`${theme.cardBg} shadow-sm border-b ${theme.cardBorder} px-6 py-4 flex items-center justify-between z-20 sticky top-0 transition-colors`}>
               <div className="flex items-center gap-3">
                 <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}>
-                  <MapPin size={20} />
+                  <MapPin />
                 </div>
                 <div>
                   <h1 className={`text-xl font-bold tracking-tight ${theme.textMain}`}>
@@ -562,14 +519,13 @@
               </div>
               
               <div className="flex items-center gap-3">
-                {/* PayPal Button - Always visible */}
                 <a 
                   href="https://paypal.me/sivarajpragasm" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 px-3 py-2 rounded-full bg-[#0070BA] text-white text-xs font-bold hover:bg-[#003087] transition-colors shadow-sm"
                 >
-                  <Heart size={14} className="fill-white" />
+                  <Heart className="w-3.5 h-3.5 fill-white" />
                   Donate
                 </a>
 
@@ -577,7 +533,7 @@
                   onClick={() => setIsDarkMode(!isDarkMode)}
                   className={`p-2 rounded-full border ${theme.cardBorder} ${theme.textSub} hover:${theme.bg} transition-all`}
                 >
-                  {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+                  {isDarkMode ? <Sun /> : <Moon />}
                 </button>
               </div>
             </header>
@@ -601,16 +557,15 @@
                         className={`w-full pl-10 pr-4 py-3 ${theme.inputBg} border ${theme.inputBorder} rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all text-sm ${theme.textMain} placeholder-${isDarkMode ? 'slate-500' : 'slate-400'}`}
                         autoComplete="off"
                       />
-                      <Search className={`absolute left-3 top-3.5 ${theme.textSub}`} size={18} />
+                      <div className={`absolute left-3 top-3.5 ${theme.textSub}`}><Search /></div>
                       <button 
                         type="submit" 
                         disabled={loading}
                         className={`absolute right-2 top-2 p-1.5 rounded-md transition-colors disabled:opacity-50 ${theme.buttonPrimary}`}
                       >
-                        {loading ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"/> : <Navigation size={16} />}
+                        {loading ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"/> : <Navigation />}
                       </button>
                       
-                      {/* Auto-suggest Dropdown */}
                       {showSuggestions && suggestions.length > 0 && (
                         <div className={`absolute top-full left-0 right-0 mt-1 ${theme.cardBg} border ${theme.cardBorder} rounded-lg shadow-xl overflow-hidden z-50 max-h-60 overflow-y-auto`}>
                           {suggestions.map((item, idx) => (
@@ -636,7 +591,7 @@
                       }`}
                       title="Select location on map"
                     >
-                      <Crosshair size={20} />
+                      <Crosshair />
                     </button>
                   </div>
 
@@ -648,7 +603,7 @@
 
                   {error && (
                     <div className="mt-3 p-3 bg-red-900/20 text-red-400 text-sm rounded-lg flex items-center gap-2 border border-red-900/30">
-                      <AlertTriangle size={16} />
+                      <AlertTriangle />
                       {error}
                     </div>
                   )}
@@ -656,7 +611,7 @@
 
                 {!data && !loading && (
                   <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[300px]`}>
-                    <MapPin size={48} className="mb-4 opacity-20" />
+                    <div className="opacity-20 mb-4"><MapPin /></div>
                     <p className="text-center text-sm">Search for a street or district in Ho Chi Minh City.</p>
                   </div>
                 )}
@@ -692,7 +647,7 @@
                       <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
                         <div className="flex justify-between items-start">
                           <span className={`text-xs font-medium ${theme.textSub}`}>HUMIDITY</span>
-                          <Droplets className={theme.accentPrimary} size={24} />
+                          <div className={theme.accentPrimary}><Droplets /></div>
                         </div>
                         <div>
                           <div className="text-2xl font-bold">{data.weather.humidity}%</div>
@@ -706,7 +661,7 @@
                     {/* Rain */}
                     <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                       <div className="flex items-center gap-2 mb-3">
-                        <CloudRain size={18} className={theme.accentPrimary} />
+                        <div className={theme.accentPrimary}><CloudRain /></div>
                         <span className="font-semibold">Rain</span>
                       </div>
                       <div className="flex items-end gap-2">
@@ -721,7 +676,7 @@
                       </div>
                     </div>
 
-                    {/* Flood Risk Card (Enhanced) */}
+                    {/* Flood Risk Card */}
                     <div className={`p-4 rounded-xl shadow-sm border transition-colors ${
                       data.flood.level === 'High' || data.flood.level === 'Critical' 
                         ? 'bg-red-50 border-red-200' 
@@ -729,7 +684,7 @@
                     }`}>
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
-                          <Activity size={18} className={data.flood.level === 'High' || data.flood.level === 'Critical' ? 'text-red-500' : theme.accentPrimary} />
+                          <div className={data.flood.level === 'High' || data.flood.level === 'Critical' ? 'text-red-500' : theme.accentPrimary}><Activity /></div>
                           <span className={`font-semibold ${getStatusColor(data.flood.level, 'flood')}`}>
                             Flood Risk Estimate
                           </span>
@@ -762,9 +717,8 @@
                           </div>
                         </div>
                         
-                        {/* Water Levels Update */}
                         <div className={`flex items-start gap-2 text-xs ${theme.textSub} p-2 ${theme.inputBg} rounded-md border ${theme.inputBorder}`}>
-                          <Waves size={16} className="shrink-0 mt-0.5" />
+                          <div className="shrink-0 mt-0.5"><Waves /></div>
                           <div className="flex-1">
                             <div className="flex justify-between mb-0.5">
                               <span>Nearby Canal Levels:</span>
@@ -783,7 +737,7 @@
                     {/* Official Alerts */}
                     <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                       <div className="flex items-center gap-2 mb-3">
-                        <Newspaper size={18} className="text-pink-500" />
+                        <div className="text-pink-500"><Newspaper /></div>
                         <span className="font-semibold">Official Alerts & News</span>
                       </div>
                       <div className="space-y-3">
@@ -804,7 +758,7 @@
                                           item.type === 'warning' ? 'text-orange-600' : theme.textSub
                                       }`}>
                                         {item.source} 
-                                        <ExternalLink size={10} className="ml-1 inline opacity-50"/>
+                                        <div className="ml-1 inline opacity-50"><ExternalLink /></div>
                                       </span>
                                       <span className={theme.textSub}>{item.time}</span>
                                   </div>
@@ -817,11 +771,10 @@
                     {/* Tide Information */}
                     <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                       <div className="flex items-center gap-2 mb-3">
-                        <Waves size={18} className={theme.accentPrimary} />
+                        <div className={theme.accentPrimary}><Waves /></div>
                         <span className="font-semibold">Tide Forecast (Today)</span>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
-                        {/* High Tide Column */}
                         <div className="flex flex-col gap-2">
                           <div className={`text-xs font-bold uppercase text-center ${theme.accentPrimary} pb-2 border-b ${theme.cardBorder}`}>
                             High Tide
@@ -834,7 +787,6 @@
                           ))}
                         </div>
 
-                        {/* Low Tide Column */}
                         <div className="flex flex-col gap-2">
                           <div className={`text-xs font-bold uppercase text-center ${theme.textSub} pb-2 border-b ${theme.cardBorder}`}>
                             Low Tide
@@ -852,7 +804,7 @@
                     {/* Traffic Analysis */}
                     <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                       <div className="flex items-center gap-2 mb-4">
-                        <Layers size={18} className="text-orange-500" />
+                        <div className="text-orange-500"><Layers /></div>
                         <span className="font-semibold">5km Traffic Analysis</span>
                       </div>
                       
