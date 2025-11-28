@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Stay Dry HCMC</title>
     
-    <!-- SOCIAL SHARE TAGS -->
+    <!-- SOCIAL SHARE TAGS (Controls the Link Preview) -->
     <meta property="og:title" content="Stay Dry HCMC">
     <meta property="og:description" content="Real-time flood and weather monitoring for Ho Chi Minh City.">
-    <meta property="og:image" content="https://i.ibb.co/YS30W1c/icon-512.png"> 
+    
+    <!-- CHANGE THIS URL TO YOUR LOGO URL -->
+    <meta property="og:image" content="https://i.ibb.co/YS30W1c/icon-512.png">
+    
     <meta property="og:url" content="https://stay-dry-hcmc.vercel.app">
     <meta property="og:type" content="website">
 
@@ -339,7 +342,7 @@
                         <div className="flex items-center gap-2">
                             <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}><Icon name="MapPin" size={18}/></div>
                             <div>
-                                <h1 className={isDarkMode ? "text-xl font-bold tracking-tight text-white" : "text-xl font-bold tracking-tight text-black"}>Stay Dry</h1>
+                                <h1 className={`text-xl font-bold tracking-tight ${isDarkMode ? 'text-white' : 'text-black'}`}>Stay Dry</h1>
                                 <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase tracking-wide`}><div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>Ho Chi Minh City</div>
                             </div>
                         </div>
@@ -416,7 +419,7 @@
                         </div>
                         <div className={`lg:col-span-2 rounded-xl shadow-inner border ${theme.cardBorder} relative overflow-hidden`}>
                             <div id="map" ref={mapRef} style={{ minHeight: '500px', width: '100%', height: '100%' }} />
-                            <div className={`absolute bottom-4 right-4 ${isDarkMode ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur p-3 rounded-lg shadow-lg text-xs z-[400] border ${theme.cardBorder}`}><h4 className="font-bold mb-2">Legend</h4><div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm"></div><span className={theme.textSub}>Your Location</span></div><div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 opacity-50"></div><span className={theme.textSub}>Known Flood Zone</span></div><div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full ${isDarkMode ? 'bg-blue-500' : 'bg-lime-600'} opacity-20 border`}></div><span className={theme.textSub}>5km Radius</span></div><div className="mt-2 text-[10px] text-gray-500 text-right">v9</div></div>
+                            <div className={`absolute bottom-4 right-4 ${isDarkMode ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur p-3 rounded-lg shadow-lg text-xs z-[400] border ${theme.cardBorder}`}><h4 className="font-bold mb-2">Legend</h4><div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm"></div><span className={theme.textSub}>Your Location</span></div><div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 opacity-50"></div><span className={theme.textSub}>Known Flood Zone</span></div><div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full ${isDarkMode ? 'bg-blue-500' : 'bg-lime-600'} opacity-20 border`}></div><span className={theme.textSub}>5km Radius</span></div><div className="mt-2 text-[10px] text-gray-500 text-right">v10</div></div>
                         </div>
                     </main>
                 </div>
@@ -430,8 +433,8 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          // Force update with version query param to bypass cache
-          navigator.serviceWorker.register('/service-worker.js?v=9')
+          // FORCE UPDATE: Uses v10 cache
+          navigator.serviceWorker.register('/service-worker.js?v=10')
             .then(reg => {
                 reg.onupdatefound = () => {
                     const installingWorker = reg.installing;
