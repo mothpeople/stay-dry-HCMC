@@ -177,24 +177,27 @@ export default function App() {
     setTimeout(() => mapInstance.invalidateSize(), 200);
   }, [data, mapInstance, isDarkMode]);
 
-  // --- Address Standardizer ---
+  // --- Address Standardizer (Street, Ward, District) ---
   const formatAddress = (addrObj) => {
     if (!addrObj) return "Unknown Location";
     const street = addrObj.road || addrObj.street || addrObj.pedestrian || "";
     const ward = addrObj.ward || addrObj.quarter || "";
-    const district = addrObj.city_district || addrObj.district || "";
+    const district = addrObj.city_district || addrObj.district || addrObj.suburb || "";
     
+    // Strict Filtering
     const parts = [];
     if (street) parts.push(street);
     if (ward) parts.push(ward.includes('Phường') ? ward : `Phường ${ward}`);
     if (district) parts.push(district);
     
+    // Fallback if parts are empty (e.g. just a city click)
     return parts.length > 0 ? parts.join(', ') : (addrObj.city || "Ho Chi Minh City");
   };
 
   // --- Data Fetching ---
   const fetchEnvironmentalData = async (lat, lng, formattedAddress) => {
     try {
+      // Added precipitation to hourly for "Rainfall Amount"
       const weatherRes = await fetch(
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&hourly=uv_index,precipitation_probability,precipitation&daily=uv_index_max&air_quality=us_aqi&timezone=Asia%2FHo_Chi_Minh`
       );
@@ -216,8 +219,9 @@ export default function App() {
       const uvIndex = hourly.uv_index[currentHour] || 0;
       const currentRain = current.rain || 0;
       const nextHourRainProb = hourly.precipitation_probability ? hourly.precipitation_probability[currentHour + 1] : 0;
-      const nextHourRainAmount = hourly.precipitation ? hourly.precipitation[currentHour + 1] : 0; 
+      const nextHourRainAmount = hourly.precipitation ? hourly.precipitation[currentHour + 1] : 0; // Rain amount
 
+      // Process Tide Data
       let tideData = [];
       if (marineData && marineData.daily) {
         const highs = marineData.daily.tide_high.slice(0, 2);
@@ -246,7 +250,7 @@ export default function App() {
           humidity: current.relative_humidity_2m,
           rain: currentRain,
           nextHourProb: nextHourRainProb,
-          nextHourAmount: nextHourRainAmount, 
+          nextHourAmount: nextHourRainAmount, // New Field
           uv: uvIndex,
           aqi: aqi,
           code: current.weather_code
@@ -261,7 +265,7 @@ export default function App() {
     }
   };
 
-  // --- Search & Input Logic ---
+  // --- Search & Input Logic (With Deduplication) ---
   const handleInputChange = (e) => {
     const value = e.target.value; setAddress(value);
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -309,8 +313,8 @@ export default function App() {
 
   const generateNewsUpdates = (rain, nextProb) => {
     const updates = [];
-    // Official Traffic Button
     updates.push({ 
+        source: 'Official Traffic Map', 
         type: 'traffic-button', 
         url: 'https://giaothong.hochiminhcity.gov.vn/'
     });
@@ -409,20 +413,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Commute Conditions (UV & Air) - Now BELOW Temp */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>UV INDEX</span><Sun size={20} className={getStatusColor(data.weather.uv, 'uv')}/></div>
-                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.uv, 'uv')}`}>{data.weather.uv.toFixed(1)}</div>
-                  <div className="text-[10px] text-slate-400">{data.weather.uv > 7 ? 'High' : 'Low'}</div>
-                </div>
-                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>AIR (AQI)</span><Wind size={20} className={getStatusColor(data.weather.aqi, 'aqi')}/></div>
-                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi}</div>
-                  <div className="text-[10px] text-slate-400">US Standard</div>
-                </div>
-              </div>
-
               {/* Rain Card */}
               <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                 <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><CloudRain size={18} className={theme.accentPrimary}/><span className="font-semibold">Rain Status</span></div><span className={`text-xs font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain > 0 ? 'RAINING' : 'DRY'}</span></div>
@@ -439,7 +429,21 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Official Updates */}
+              {/* Commute Conditions (UV & Air) - Now BELOW Temp */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>UV INDEX</span><Sun size={20} className={getStatusColor(data.weather.uv, 'uv')}/></div>
+                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.uv, 'uv')}`}>{data.weather.uv.toFixed(1)}</div>
+                  <div className="text-[10px] text-slate-400">{data.weather.uv > 7 ? 'High' : 'Low'}</div>
+                </div>
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>AIR (AQI)</span><Wind size={20} className={getStatusColor(data.weather.aqi, 'aqi')}/></div>
+                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi}</div>
+                  <div className="text-[10px] text-slate-400">US Standard</div>
+                </div>
+              </div>
+
+              {/* Updates Section */}
               <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                 <div className="flex gap-2 mb-3"><Newspaper size={18} className="text-pink-500"/><span className="font-semibold">Official Updates</span></div>
                 {data.news.map((item, i) => (
