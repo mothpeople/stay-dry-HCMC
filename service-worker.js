@@ -1,5 +1,5 @@
-// WE CHANGED v2 TO v3 HERE - THIS FORCES THE UPDATE
-const CACHE_NAME = 'stay-dry-hcmc-v3';
+// BUMPED TO v4 TO FORCE UPDATE
+const CACHE_NAME = 'stay-dry-hcmc-v4';
 
 const urlsToCache = [
   '/',
@@ -10,7 +10,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  self.skipWaiting(); // Force this new worker to become active immediately
+  self.skipWaiting(); // Force active immediately
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -26,7 +26,7 @@ self.addEventListener('activate', event => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName); // Delete v1 and v2
+            return caches.delete(cacheName); // Delete old v1, v2, v3
           }
         })
       );
