@@ -1,5 +1,5 @@
-// BUMPED TO v9 TO FORCE UPDATE ON PHONE (FIXES TITLE VISIBILITY)
-const CACHE_NAME = 'stay-dry-hcmc-v9';
+// BUMPED TO v10 TO FORCE UPDATE ON PHONE
+const CACHE_NAME = 'stay-dry-hcmc-v10';
 
 const urlsToCache = [
   '/',
@@ -10,7 +10,8 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  self.skipWaiting(); // Force this new worker to become active immediately
+  // Force this new worker to become active immediately, skipping the wait
+  self.skipWaiting(); 
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -25,13 +26,15 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
+          // Delete old caches (v1 through v9)
           if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName); // Delete old v1-v8
+            return caches.delete(cacheName); 
           }
         })
       );
     })
   );
+  // Tell the active service worker to take control of the page immediately
   self.clients.claim();
 });
 
@@ -39,6 +42,7 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request)
       .then(response => {
+        // Return cached file if found, otherwise fetch from network
         if (response) {
           return response;
         }
