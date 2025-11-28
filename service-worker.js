@@ -1,5 +1,5 @@
-// BUMPED TO v4 TO FORCE UPDATE
-const CACHE_NAME = 'stay-dry-hcmc-v4';
+// BUMPED TO v6 TO FORCE UPDATE ON PHONE
+const CACHE_NAME = 'stay-dry-hcmc-v6';
 
 const urlsToCache = [
   '/',
@@ -10,7 +10,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  self.skipWaiting(); // Force active immediately
+  self.skipWaiting(); // Forces the new worker to activate immediately
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -26,7 +26,7 @@ self.addEventListener('activate', event => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName); // Delete old v1, v2, v3
+            return caches.delete(cacheName); // Deletes old versions
           }
         })
       );
