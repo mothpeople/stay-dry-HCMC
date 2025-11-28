@@ -1,5 +1,5 @@
-// BUMPED TO v6 TO FORCE UPDATE ON PHONE
-const CACHE_NAME = 'stay-dry-hcmc-v6';
+// BUMPED TO v7 TO FORCE UPDATE ON PHONE
+const CACHE_NAME = 'stay-dry-hcmc-v7';
 
 const urlsToCache = [
   '/',
