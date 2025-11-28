@@ -1,5 +1,5 @@
-// BUMPED TO v8 TO FORCE UPDATE ON PHONE (FIXES TITLE VISIBILITY)
-const CACHE_NAME = 'stay-dry-hcmc-v8';
+// BUMPED TO v9 TO FORCE UPDATE ON PHONE (FIXES TITLE VISIBILITY)
+const CACHE_NAME = 'stay-dry-hcmc-v9';
 
 const urlsToCache = [
   '/',
@@ -26,7 +26,7 @@ self.addEventListener('activate', event => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName); // Delete old v1-v7
+            return caches.delete(cacheName); // Delete old v1-v8
           }
         })
       );
