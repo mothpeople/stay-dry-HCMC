@@ -1,18 +1,17 @@
-// BUMPED TO v106 TO MATCH HTML AND FORCE UPDATE
-const CACHE_NAME = 'stay-dry-hcmc-v106';
+// BUMPED TO v107 TO FIX PWA LOADING ISSUE
+const CACHE_NAME = 'stay-dry-hcmc-v107';
 
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/logo.png', // Make sure to cache your logo!
+  '/logo.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 ];
 
 self.addEventListener('install', event => {
-  // Force this new worker to become active immediately, skipping the wait
-  self.skipWaiting();
+  self.skipWaiting(); // Force active immediately
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -28,7 +27,6 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          // Delete old caches that don't match the current version
           if (cacheWhitelist.indexOf(cacheName) === -1) {
             console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName);
@@ -37,19 +35,28 @@ self.addEventListener('activate', event => {
       );
     })
   );
-  // Tell the active service worker to take control of the page immediately
   self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
+  // Special handling for navigation requests (HTML pages)
+  // This fixes the "App doesn't load" issue by ensuring we always try network first for the main page,
+  // but reliably fall back to the cached index.html if offline.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => {
+          return caches.match('/index.html');
+        })
+    );
+    return;
+  }
+
+  // Stale-while-revalidate for everything else (CSS, JS, Images)
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        // Return cached file if found, otherwise fetch from network
-        if (response) {
-          return response;
-        }
-        return fetch(event.request);
+        return response || fetch(event.request);
       })
   );
 });
