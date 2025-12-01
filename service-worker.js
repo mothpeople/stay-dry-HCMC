@@ -1,5 +1,5 @@
-// BUMPED TO v10 TO FORCE UPDATE ON PHONE
-const CACHE_NAME = 'stay-dry-hcmc-v10';
+// BUMPED TO v11 TO FORCE UPDATE ON PHONE
+const CACHE_NAME = 'stay-dry-hcmc-v11';
 
 const urlsToCache = [
   '/',
@@ -26,7 +26,7 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          // Delete old caches (v1 through v9)
+          // Delete old caches (v1 through v10)
           if (cacheWhitelist.indexOf(cacheName) === -1) {
             return caches.delete(cacheName); 
           }
