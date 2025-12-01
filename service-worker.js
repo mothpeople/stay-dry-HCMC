@@ -1,5 +1,5 @@
-// BUMPED TO v16 TO FORCE UPDATE
-const CACHE_NAME = 'stay-dry-hcmc-v16';
+// BUMPED TO v18 TO FORCE DELETE OLD CACHE & FIX ICONS
+const CACHE_NAME = 'stay-dry-hcmc-v18';
 
 const urlsToCache = [
   '/',
@@ -10,8 +10,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  // Force this new worker to become active immediately, skipping the wait
-  self.skipWaiting(); 
+  self.skipWaiting(); // Force active immediately
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -26,7 +25,7 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          // Delete old caches (v1 through v15)
+          // Delete ALL old caches (v1 through v17)
           if (cacheWhitelist.indexOf(cacheName) === -1) {
             console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName); 
@@ -35,7 +34,6 @@ self.addEventListener('activate', event => {
       );
     })
   );
-  // Tell the active service worker to take control of the page immediately
   self.clients.claim();
 });
 
@@ -43,7 +41,6 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        // Return cached file if found, otherwise fetch from network
         if (response) {
           return response;
         }
