@@ -1,5 +1,5 @@
-// BUMPED TO v16 TO FORCE UPDATE
-const CACHE_NAME = 'stay-dry-hcmc-v16';
+// BUMPED TO v17 TO FORCE UPDATE AND FIX LOADING ISSUES
+const CACHE_NAME = 'stay-dry-hcmc-v17';
 
 const urlsToCache = [
   '/',
