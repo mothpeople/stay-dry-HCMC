@@ -42,7 +42,7 @@
             overlay.innerHTML = `<strong>App Error:</strong> ${message} <br><small>${source}:${lineno}</small>`;
         };
     </script>
-    <!-- CACHE BUSTER v106 -->
+    <!-- CACHE BUSTER v202 -->
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
@@ -75,7 +75,6 @@
         const HCMC_CENTER = [10.7769, 106.7009];
         const HCMC_BOUNDS = [[10.3500, 106.3000], [11.1600, 107.0200]];
         const TIDE_STATION_COORDS = { lat: 10.34, lng: 107.08 };
-        const SEARCH_VIEWBOX = "106.3,11.2,106.95,10.3";
 
         const FLOOD_HOTSPOTS = [
             { name: "Nguyen Huu Canh", lat: 10.7925, lng: 106.7163, desc: "Severe flooding during heavy rain" },
@@ -190,7 +189,7 @@
                     try {
                         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
                         const data = await res.json();
-                        let formattedAddr = formatAddress(data, false); // pass full object
+                        let formattedAddr = formatAddress(data.address, false);
                         if (!formattedAddr) formattedAddr = `Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
                         setAddress(formattedAddr); 
                         await fetchEnvironmentalData(lat, lng, formattedAddr);
@@ -216,20 +215,24 @@
             }, [data, mapInstance, isDarkMode]);
 
             // --- STRICT ADDRESS FILTER ---
-            const formatAddress = (item, strictHCMC = true) => {
-                if (!item || !item.address) return null;
-                const addrObj = item.address;
-                // Check Full Display Name for Forbidden Words (Strongest check)
-                const displayName = (item.display_name || "").toLowerCase();
-                
-                // BAN NEIGHBORING PROVINCES
-                if (displayName.includes("vũng tàu") || displayName.includes("bà rịa") || displayName.includes("đồng nai") || displayName.includes("bình dương") || displayName.includes("dĩ an") || displayName.includes("thuận an") || displayName.includes("biên hòa") || displayName.includes("long an")) {
+            const formatAddress = (addrObj, strictHCMC = true) => {
+                if (!addrObj) return null;
+                const fullStr = JSON.stringify(addrObj).toLowerCase();
+
+                // 1. Negative Filter: Ban neighbors aggressively
+                if (fullStr.includes("vũng tàu") || fullStr.includes("bà rịa") || fullStr.includes("đồng nai") || fullStr.includes("bình dương") || fullStr.includes("dĩ an") || fullStr.includes("thuận an") || fullStr.includes("biên hòa") || fullStr.includes("long an")) {
                     return null;
                 }
 
-                // REQUIRE HCMC
+                // 2. Positive Filter: Must contain "Ho Chi Minh"
                 if (strictHCMC) {
-                    if (!displayName.includes("hồ chí minh") && !displayName.includes("ho chi minh") && !displayName.includes("saigon")) {
+                    const city = addrObj.city || "";
+                    const state = addrObj.state || "";
+                    const province = addrObj.province || "";
+                    const county = addrObj.county || "";
+                    
+                    const allAdmin = `${city} ${state} ${province} ${county}`.toLowerCase();
+                    if (!allAdmin.includes("hồ chí minh") && !allAdmin.includes("ho chi minh") && !allAdmin.includes("saigon")) {
                         return null;
                     }
                 }
@@ -298,20 +301,23 @@
                 if (!value.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
                 debounceTimerRef.current = setTimeout(async () => {
                     try { 
-                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=${SEARCH_VIEWBOX}&bounded=1&countrycodes=vn&limit=20&addressdetails=1&_t=${Date.now()}`); 
+                        // SEARCH: Tighter Viewbox, More Results (20) to allow filtering
+                        // IMPORTANT: We fetch more, then filter clientside to remove Vung Tau results
+                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=106.3,11.2,106.95,10.3&bounded=1&countrycodes=vn&limit=20&addressdetails=1&_t=${Date.now()}`); 
                         if (res.ok) { 
                             const rawResults = await res.json();
                             const uniqueResults = [];
                             const seenAddresses = new Set();
                             rawResults.forEach(item => {
-                                // Pass full item for validation
-                                const fmt = formatAddress(item, true);
+                                // Pass full item for validation against forbidden words
+                                const fmt = formatAddress(item.address, true);
                                 if (fmt && !seenAddresses.has(fmt)) {
                                     seenAddresses.add(fmt);
                                     item.formatted_display = fmt;
                                     uniqueResults.push(item);
                                 }
                             });
+                            // Only show top 5 valid HCMC results
                             setSuggestions(uniqueResults.slice(0, 5)); setShowSuggestions(true); 
                         } 
                     } catch (err) {}
@@ -326,13 +332,13 @@
             const handleSearch = async (e) => { 
                 e.preventDefault(); if(!address.trim()) return; setLoading(true); setShowSuggestions(false); 
                 try { 
-                    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=${SEARCH_VIEWBOX}&bounded=1&countrycodes=vn&addressdetails=1`); 
+                    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=106.3,11.2,107.1,10.3&bounded=1&countrycodes=vn&addressdetails=1`); 
                     const d = await r.json(); 
                     if(!d.length) throw new Error("Not found in HCMC"); 
-                    // Find valid
-                    const validLoc = d.find(loc => formatAddress(loc, true) !== null);
+                    // Find valid HCMC result
+                    const validLoc = d.find(loc => formatAddress(loc.address, true) !== null);
                     if (!validLoc) throw new Error("Address not found in Ho Chi Minh City.");
-                    await fetchEnvironmentalData(parseFloat(validLoc.lat), parseFloat(validLoc.lon), formatAddress(validLoc, true)); 
+                    await fetchEnvironmentalData(parseFloat(validLoc.lat), parseFloat(validLoc.lon), formatAddress(validLoc.address, true)); 
                 } catch (e) { setError(e.message); setLoading(false); } 
             };
 
@@ -413,7 +419,7 @@
                                 <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}>
                                     <MapPin size={48} className="mb-4 opacity-20" />
                                     <p className="text-center text-sm">Search to check Rain, UV, and Tides.</p>
-                                    <span className="mt-4 text-[10px] opacity-50">v2.3</span>
+                                    <span className="mt-4 text-[10px] opacity-50">v2.4</span>
                                 </div>
                             )}
 
