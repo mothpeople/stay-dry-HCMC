@@ -3,10 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <!-- NO-CACHE HEADERS -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
+
     <title>Stay Dry HCMC</title>
+    
     <meta property="og:title" content="Stay Dry HCMC">
     <meta property="og:description" content="Real-time flood and weather monitoring for Ho Chi Minh City.">
     <meta property="og:image" content="https://stay-dry-hcmc.vercel.app/logo.png">
@@ -15,17 +19,20 @@
     <meta property="og:image:type" content="image/png">
     <meta property="og:url" content="https://stay-dry-hcmc.vercel.app">
     <meta property="og:type" content="website">
+
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#f7fee7">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="/logo.png">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <style>
         #map { min-height: 500px; height: 100%; width: 100%; z-index: 1; }
         body { overscroll-behavior-y: none; }
@@ -35,6 +42,7 @@
 <body class="bg-lime-50">
     <div id="error-overlay"></div>
     <div id="root"></div>
+
     <script>
         window.onerror = function(message, source, lineno, colno, error) {
             const overlay = document.getElementById('error-overlay');
@@ -42,7 +50,8 @@
             overlay.innerHTML = `<strong>App Error:</strong> ${message} <br><small>${source}:${lineno}</small>`;
         };
     </script>
-    <!-- CACHE BUSTER v202 -->
+
+    <!-- CACHE BUSTER v210 -->
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
@@ -70,11 +79,13 @@
         const Video = (p) => <IconBase {...p}><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></IconBase>;
         const MapIcon = (p) => <IconBase {...p}><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" x2="9" y1="3" y2="18"/><line x1="15" x2="15" y1="6" y2="21"/></IconBase>;
         const Calendar = (p) => <IconBase {...p}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></IconBase>;
+        const Locate = (p) => <IconBase {...p}><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><circle cx="12" cy="12" r="7"/></IconBase>;
 
         // --- CONSTANTS ---
         const HCMC_CENTER = [10.7769, 106.7009];
         const HCMC_BOUNDS = [[10.3500, 106.3000], [11.1600, 107.0200]];
         const TIDE_STATION_COORDS = { lat: 10.34, lng: 107.08 };
+        const SEARCH_VIEWBOX = "106.3,11.2,106.95,10.3";
 
         const FLOOD_HOTSPOTS = [
             { name: "Nguyen Huu Canh", lat: 10.7925, lng: 106.7163, desc: "Severe flooding during heavy rain" },
@@ -110,12 +121,14 @@
             const searchContainerRef = useRef(null);
             const debounceTimerRef = useRef(null); 
 
+            // --- Service Worker ---
             useEffect(() => {
                 if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.protocol === 'http:')) {
                     navigator.serviceWorker.register('/service-worker.js').then(r => r.update()).catch(err => console.log('SW Reg Skipped'));
                 }
             }, []);
 
+            // --- Clock ---
             useEffect(() => {
                 const updateTime = () => {
                     const now = new Date();
@@ -150,6 +163,7 @@
                 }
             };
 
+            // Load Leaflet
             useEffect(() => {
                 const checkL = setInterval(() => {
                     if (window.L) { setLeafletLoaded(true); clearInterval(checkL); }
@@ -157,6 +171,7 @@
                 return () => clearInterval(checkL);
             }, []);
 
+            // Initialize Map
             useEffect(() => {
                 if (!leafletLoaded || !mapRef.current || mapInstance) return;
                 if (!window.L) return;
@@ -174,6 +189,7 @@
                 return () => { if (mapInstance) { mapInstance.remove(); setMapInstance(null); } };
             }, [leafletLoaded]);
 
+            // Pin Mode Cursor
             useEffect(() => {
                 if (!mapInstance) return;
                 const container = mapInstance.getContainer();
@@ -199,6 +215,7 @@
                 return () => { mapInstance.off('click', onMapClick); container.classList.remove('crosshair-active'); container.style.cursor = ''; };
             }, [mapInstance, isPinMode]);
 
+            // Update Map Visuals
             useEffect(() => {
                 if (!mapInstance || !data || !window.L) return;
                 const { lat, lng } = data.coords;
@@ -219,18 +236,13 @@
                 if (!addrObj) return null;
                 const fullStr = JSON.stringify(addrObj).toLowerCase();
 
-                // 1. Negative Filter: Ban neighbors aggressively
-                if (fullStr.includes("vũng tàu") || fullStr.includes("bà rịa") || fullStr.includes("đồng nai") || fullStr.includes("bình dương") || fullStr.includes("dĩ an") || fullStr.includes("thuận an") || fullStr.includes("biên hòa") || fullStr.includes("long an")) {
-                    return null;
-                }
+                if (fullStr.includes("vũng tàu") || fullStr.includes("bà rịa") || fullStr.includes("đồng nai") || fullStr.includes("bình dương") || fullStr.includes("long an")) return null;
 
-                // 2. Positive Filter: Must contain "Ho Chi Minh"
                 if (strictHCMC) {
                     const city = addrObj.city || "";
                     const state = addrObj.state || "";
                     const province = addrObj.province || "";
                     const county = addrObj.county || "";
-                    
                     const allAdmin = `${city} ${state} ${province} ${county}`.toLowerCase();
                     if (!allAdmin.includes("hồ chí minh") && !allAdmin.includes("ho chi minh") && !allAdmin.includes("saigon")) {
                         return null;
@@ -240,14 +252,50 @@
                 const street = addrObj.road || addrObj.street || addrObj.pedestrian;
                 if (!street) return null;
 
-                let ward = addrObj.quarter || addrObj.ward || addrObj.neighbourhood;
-                if (ward && !ward.toLowerCase().includes('phường') && !ward.toLowerCase().startsWith('p.')) {
-                    ward = `Phường ${ward}`;
-                }
-
+                let ward = addrObj.quarter || addrObj.ward || addrObj.neighbourhood || addrObj.suburb || addrObj.residential; 
+                if (ward && !ward.toLowerCase().includes('phường') && !ward.toLowerCase().startsWith('p.')) ward = `Phường ${ward}`;
                 const district = addrObj.city_district || addrObj.district || addrObj.suburb;
                 const parts = [street, ward, district].filter(Boolean);
                 return parts.length > 0 ? parts.join(', ') : null;
+            };
+
+            // --- NEW: GEOLOCATION HANDLER ---
+            const handleLocateMe = () => {
+                if (!navigator.geolocation) {
+                    setError("Geolocation is not supported by your browser");
+                    return;
+                }
+                setLoading(true);
+                setError(null);
+                
+                navigator.geolocation.getCurrentPosition(async (position) => {
+                    const { latitude, longitude } = position.coords;
+                    
+                    // Bounds Check
+                    if (latitude < HCMC_BOUNDS[0][0] || latitude > HCMC_BOUNDS[1][0] || longitude < HCMC_BOUNDS[0][1] || longitude > HCMC_BOUNDS[1][1]) {
+                        setError("You are currently outside Ho Chi Minh City.");
+                        setLoading(false);
+                        return;
+                    }
+
+                    try {
+                        // Reverse Geocode
+                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`);
+                        const data = await res.json();
+                        
+                        let formattedAddr = formatAddress(data.address, false); // Relaxed check for current location
+                        if (!formattedAddr) formattedAddr = `Current Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+                        
+                        setAddress(formattedAddr);
+                        await fetchEnvironmentalData(latitude, longitude, formattedAddr);
+                    } catch (err) {
+                        setError("Could not retrieve your location details.");
+                        setLoading(false);
+                    }
+                }, (err) => {
+                    setError("Unable to retrieve your location. Please allow GPS access.");
+                    setLoading(false);
+                });
             };
 
             const fetchEnvironmentalData = async (lat, lng, formattedAddress) => {
@@ -301,15 +349,13 @@
                 if (!value.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
                 debounceTimerRef.current = setTimeout(async () => {
                     try { 
-                        // SEARCH: Tighter Viewbox, More Results (20) to allow filtering
-                        // IMPORTANT: We fetch more, then filter clientside to remove Vung Tau results
-                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=106.3,11.2,106.95,10.3&bounded=1&countrycodes=vn&limit=20&addressdetails=1&_t=${Date.now()}`); 
+                        // Limit 20 to allow filtering
+                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=${SEARCH_VIEWBOX}&bounded=1&countrycodes=vn&limit=20&addressdetails=1&_t=${Date.now()}`); 
                         if (res.ok) { 
                             const rawResults = await res.json();
                             const uniqueResults = [];
                             const seenAddresses = new Set();
                             rawResults.forEach(item => {
-                                // Pass full item for validation against forbidden words
                                 const fmt = formatAddress(item.address, true);
                                 if (fmt && !seenAddresses.has(fmt)) {
                                     seenAddresses.add(fmt);
@@ -317,7 +363,6 @@
                                     uniqueResults.push(item);
                                 }
                             });
-                            // Only show top 5 valid HCMC results
                             setSuggestions(uniqueResults.slice(0, 5)); setShowSuggestions(true); 
                         } 
                     } catch (err) {}
@@ -332,10 +377,9 @@
             const handleSearch = async (e) => { 
                 e.preventDefault(); if(!address.trim()) return; setLoading(true); setShowSuggestions(false); 
                 try { 
-                    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=106.3,11.2,107.1,10.3&bounded=1&countrycodes=vn&addressdetails=1`); 
+                    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=${SEARCH_VIEWBOX}&bounded=1&countrycodes=vn&addressdetails=1`); 
                     const d = await r.json(); 
                     if(!d.length) throw new Error("Not found in HCMC"); 
-                    // Find valid HCMC result
                     const validLoc = d.find(loc => formatAddress(loc.address, true) !== null);
                     if (!validLoc) throw new Error("Address not found in Ho Chi Minh City.");
                     await fetchEnvironmentalData(parseFloat(validLoc.lat), parseFloat(validLoc.lon), formatAddress(validLoc.address, true)); 
@@ -409,6 +453,12 @@
                                         <button type="submit" disabled={loading} className={`absolute right-2 top-2 p-1.5 rounded-md ${theme.buttonPrimary} disabled:opacity-50`}>{loading ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"/> : <Navigation size={16} />}</button>
                                         {showSuggestions && suggestions.length > 0 && <div className={`absolute top-full left-0 right-0 mt-1 ${theme.cardBg} border ${theme.cardBorder} rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto`}>{suggestions.map((item, i) => <div key={i} onClick={() => handleSuggestionClick(item)} className={`p-3 hover:${theme.inputBg} cursor-pointer border-b ${theme.cardBorder} text-sm`}>{item.formatted_display}</div>)}</div>}
                                     </form>
+                                    
+                                    {/* LOCATE ME BUTTON (NEW) */}
+                                    <button onClick={handleLocateMe} className={`p-3 rounded-lg border ${theme.buttonSecondary} hover:bg-blue-50 text-blue-600`} title="Use Current Location">
+                                        <Locate size={20} />
+                                    </button>
+                                    
                                     <button onClick={() => setIsPinMode(!isPinMode)} className={`p-3 rounded-lg border ${isPinMode ? theme.highlight : theme.buttonSecondary}`}><Crosshair size={20} /></button>
                                 </div>
                                 {isPinMode && <div className={`mt-3 text-xs px-3 py-2 rounded border animate-pulse ${theme.highlight}`}>Click map to select.</div>}
@@ -419,7 +469,7 @@
                                 <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}>
                                     <MapPin size={48} className="mb-4 opacity-20" />
                                     <p className="text-center text-sm">Search to check Rain, UV, and Tides.</p>
-                                    <span className="mt-4 text-[10px] opacity-50">v2.4</span>
+                                    <span className="mt-4 text-[10px] opacity-50">v2.7</span>
                                 </div>
                             )}
 
