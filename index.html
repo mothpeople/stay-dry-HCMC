@@ -1,588 +1,580 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+import React, { useState, useEffect, useRef } from 'react';
+import { MapPin, Droplets, CloudRain, AlertTriangle, Activity, Wind, Navigation, Layers, Crosshair, Waves, Newspaper, Sun, Moon, Heart, ExternalLink, Video, Calendar, Locate } from 'lucide-react';
+
+// Ho Chi Minh City Constants
+const HCMC_CENTER = [10.7769, 106.7009];
+const HCMC_BOUNDS = [
+  [10.3500, 106.3000],
+  [11.1600, 107.0200] 
+];
+
+// Reference: Vung Tau Ocean Station
+const TIDE_STATION_COORDS = { lat: 10.34, lng: 107.08 };
+
+// KNOWN FLOOD HOTSPOTS (Static Data)
+const FLOOD_HOTSPOTS = [
+    { name: "Nguyen Huu Canh", lat: 10.7925, lng: 106.7163, desc: "Severe flooding during heavy rain" },
+    { name: "Thao Dien", lat: 10.8033, lng: 106.7329, desc: "High tide risk area" },
+    { name: "Huynh Tan Phat", lat: 10.7431, lng: 106.7336, desc: "Major tidal flooding zone" },
+    { name: "Tran Xuan Soan", lat: 10.7533, lng: 106.7029, desc: "Canal overflow risk" },
+    { name: "Le Van Luong", lat: 10.7167, lng: 106.6978, desc: "Low-lying area" }
+];
+
+const THEMES = {
+  dark: {
+    name: 'dark',
+    bg: 'bg-slate-950',
+    textMain: 'text-slate-100',
+    textSub: 'text-slate-400',
+    cardBg: 'bg-slate-900',
+    cardBorder: 'border-slate-800',
+    inputBg: 'bg-slate-800',
+    inputBorder: 'border-slate-700',
+    accentPrimary: 'text-blue-400', 
+    buttonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white',
+    buttonSecondary: 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750',
+    highlight: 'bg-blue-900/30 text-blue-300 border-blue-800/50',
+    mapFilter: 'brightness(0.8) contrast(1.2)'
+  },
+  light: {
+    name: 'light',
+    bg: 'bg-lime-50', 
+    textMain: 'text-stone-800',
+    textSub: 'text-stone-500',
+    cardBg: 'bg-white',
+    cardBorder: 'border-lime-100',
+    inputBg: 'bg-stone-50',
+    inputBorder: 'border-stone-200',
+    accentPrimary: 'text-lime-700', 
+    buttonPrimary: 'bg-lime-700 hover:bg-lime-800 text-white',
+    buttonSecondary: 'bg-white border-lime-200 text-lime-700 hover:bg-lime-50',
+    highlight: 'bg-lime-100 text-lime-800 border-lime-200',
+    mapFilter: 'none'
+  }
+};
+
+export default function App() {
+  const [address, setAddress] = useState(''); // Kept for display logic
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+  const [mapInstance, setMapInstance] = useState(null);
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [isPinMode, setIsPinMode] = useState(false);
+  const [currentTime, setCurrentTime] = useState('');
+  
+  const theme = isDarkMode ? THEMES.dark : THEMES.light;
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const circleRef = useRef(null);
+  const hotspotMarkersRef = useRef([]); 
+
+  // --- Clock (VN Time) ---
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const options = { timeZone: 'Asia/Ho_Chi_Minh', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+      setCurrentTime(now.toLocaleString('en-US', options));
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 60000); 
+    return () => clearInterval(interval);
+  }, []);
+
+  // --- Service Worker ---
+  useEffect(() => {
+    if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.protocol === 'http:')) {
+      window.addEventListener('load', () => { navigator.serviceWorker.register('/service-worker.js').catch(err => console.log('SW Reg:', err)); });
+    }
+  }, []);
+
+  // --- Safety Colors ---
+  const getStatusColor = (value, type) => {
+    if (isDarkMode) return 'text-slate-100'; 
+    const SAFE = 'text-lime-600';
+    const WARN = 'text-orange-500';
+    const DANGER = 'text-red-600';
+
+    switch (type) {
+      case 'rain': if (value > 30) return DANGER; if (value > 5) return WARN; return SAFE;
+      case 'aqi': if (value > 150) return DANGER; if (value > 100) return WARN; return SAFE;
+      case 'uv': if (value > 8) return DANGER; if (value > 5) return WARN; return SAFE;
+      case 'tide': if (parseFloat(value) > 3.5) return DANGER; if (parseFloat(value) > 2.5) return WARN; return SAFE;
+      case 'temp': if (value > 35) return DANGER; return SAFE;
+      case 'humidity': if (value > 90) return DANGER; if (value > 75) return WARN; return SAFE; 
+      case 'canal': if (value > 2.0) return DANGER; if (value > 1.5) return WARN; return SAFE;
+      default: return theme.textMain;
+    }
+  };
+
+  // Load Leaflet
+  useEffect(() => {
+    const existingScript = document.querySelector('script[src*="leaflet.js"]');
+    if (!document.querySelector('link[href*="leaflet.css"]')) {
+        const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(link);
+    }
+    if (existingScript && window.L) { setLeafletLoaded(true); return; }
     
-    <!-- NO-CACHE HEADERS -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
+    if (!existingScript) {
+        const script = document.createElement('script'); script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; script.async = true; 
+        script.onload = () => setLeafletLoaded(true); document.body.appendChild(script);
+    } else {
+        const checkL = setInterval(() => { if (window.L) { setLeafletLoaded(true); clearInterval(checkL); } }, 200);
+        return () => clearInterval(checkL);
+    }
+  }, []);
 
-    <title>Stay Dry HCMC</title>
+  // Initialize Map
+  useEffect(() => {
+    if (!leafletLoaded || !mapRef.current || mapInstance) return;
+    if (!window.L) return;
+
+    try {
+      const map = window.L.map(mapRef.current, { center: HCMC_CENTER, zoom: 11, minZoom: 10, maxBounds: HCMC_BOUNDS, maxBoundsViscosity: 1.0 });
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(map);
+      
+      FLOOD_HOTSPOTS.forEach(spot => {
+          const marker = window.L.circleMarker([spot.lat, spot.lng], { color: 'red', fillColor: '#f03', fillOpacity: 0.5, radius: 8 }).addTo(map);
+          marker.bindPopup(`<b>${spot.name}</b><br>${spot.desc}`);
+          hotspotMarkersRef.current.push(marker);
+      });
+
+      setTimeout(() => { map.invalidateSize(); }, 500);
+      setMapInstance(map);
+    } catch (err) { console.error(err); }
+
+    return () => { if (mapInstance) { mapInstance.remove(); setMapInstance(null); } };
+  }, [leafletLoaded]);
+
+  // Update Map
+  useEffect(() => {
+    if (!mapInstance || !data || !window.L) return;
+    const { lat, lng } = data.coords;
+    mapInstance.setView([lat, lng], 14);
+
+    if (markerRef.current) mapInstance.removeLayer(markerRef.current);
+    if (circleRef.current) mapInstance.removeLayer(circleRef.current);
+
+    const newMarker = window.L.marker([lat, lng]).addTo(mapInstance);
+    newMarker.bindPopup(`<b>${data.location}</b>`).openPopup();
+    markerRef.current = newMarker;
+
+    const newCircle = window.L.circle([lat, lng], { color: isDarkMode ? '#3b82f6' : '#65a30d', fillColor: isDarkMode ? '#3b82f6' : '#65a30d', fillOpacity: 0.1, radius: 5000 }).addTo(mapInstance);
+    circleRef.current = newCircle;
+
+    mapInstance.panTo([lat, lng]);
+    setTimeout(() => mapInstance.invalidateSize(), 200);
+  }, [data, mapInstance, isDarkMode]);
+
+  // --- Address Standardizer (Deduplication Fix) ---
+  const formatAddress = (addrObj) => {
+    if (!addrObj) return "Unknown Location";
     
-    <meta property="og:title" content="Stay Dry HCMC">
-    <meta property="og:description" content="Real-time flood and weather monitoring for Ho Chi Minh City.">
-    <meta property="og:image" content="https://stay-dry-hcmc.vercel.app/logo.png">
-    <meta property="og:image:width" content="512">
-    <meta property="og:image:height" content="512">
-    <meta property="og:image:type" content="image/png">
-    <meta property="og:url" content="https://stay-dry-hcmc.vercel.app">
-    <meta property="og:type" content="website">
+    // We use a Set to automatically remove exact duplicates
+    const parts = new Set();
 
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#f7fee7">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="/logo.png">
+    // 1. Street Name
+    const street = addrObj.road || addrObj.street || addrObj.pedestrian || "";
+    if (street) parts.add(street);
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    // 2. Ward (Phuong)
+    let ward = addrObj.ward || addrObj.quarter || "";
+    if (ward) {
+        // Normalize "Phuong X" vs "X"
+        if (!ward.toLowerCase().includes('phường')) ward = `Phường ${ward}`;
+        parts.add(ward);
+    }
+
+    // 3. District
+    const district = addrObj.city_district || addrObj.district || addrObj.suburb || "";
+    if (district) parts.add(district);
     
-    <style>
-        #map { min-height: 500px; height: 100%; width: 100%; z-index: 1; }
-        body { overscroll-behavior-y: none; }
-        #error-overlay { display: none; padding: 20px; background: #fee2e2; color: #991b1b; position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-family: sans-serif; }
-    </style>
-</head>
-<body class="bg-lime-50">
-    <div id="error-overlay"></div>
-    <div id="root"></div>
+    // Convert Set back to Array
+    const result = Array.from(parts);
+    
+    return result.length > 0 ? result.join(', ') : (addrObj.city || "Ho Chi Minh City");
+  };
 
-    <script>
-        window.onerror = function(message, source, lineno, colno, error) {
-            const overlay = document.getElementById('error-overlay');
-            overlay.style.display = 'block';
-            overlay.innerHTML = `<strong>App Error:</strong> ${message} <br><small>${source}:${lineno}</small>`;
-        };
-    </script>
+  // --- Data Fetching ---
+  const fetchEnvironmentalData = async (lat, lng, formattedAddress) => {
+    try {
+      const weatherRes = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&hourly=uv_index,precipitation_probability,precipitation&daily=uv_index_max&air_quality=us_aqi&timezone=Asia%2FHo_Chi_Minh`
+      );
+      
+      const marineRes = await fetch(
+        `https://marine-api.open-meteo.com/v1/marine?latitude=${TIDE_STATION_COORDS.lat}&longitude=${TIDE_STATION_COORDS.lng}&daily=tide_high,tide_low&timezone=Asia%2FHo_Chi_Minh`
+      );
 
-    <!-- CACHE BUSTER v210 -->
-    <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+      const aqiRes = await fetch(
+        `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&current=us_aqi&timezone=Asia%2FHo_Chi_Minh`
+      );
 
-        // --- ICONS ---
-        const IconBase = ({ children, className, size = 24, ...props }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>
-        );
-        const Search = (p) => <IconBase {...p}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></IconBase>;
-        const MapPin = (p) => <IconBase {...p}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></IconBase>;
-        const Droplets = (p) => <IconBase {...p}><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.8-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></IconBase>;
-        const CloudRain = (p) => <IconBase {...p}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></IconBase>;
-        const AlertTriangle = (p) => <IconBase {...p}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></IconBase>;
-        const Activity = (p) => <IconBase {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></IconBase>;
-        const Wind = (p) => <IconBase {...p}><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/></IconBase>;
-        const Navigation = (p) => <IconBase {...p}><polygon points="3 11 22 2 13 21 11 13 3 11"/></IconBase>;
-        const Layers = (p) => <IconBase {...p}><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></IconBase>;
-        const Crosshair = (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/></IconBase>;
-        const Waves = (p) => <IconBase {...p}><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></IconBase>;
-        const Newspaper = (p) => <IconBase {...p}><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></IconBase>;
-        const Sun = (p) => <IconBase {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></IconBase>;
-        const Moon = (p) => <IconBase {...p}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></IconBase>;
-        const Info = (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></IconBase>;
-        const Heart = (p) => <IconBase {...p}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></IconBase>;
-        const ExternalLink = (p) => <IconBase {...p}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></IconBase>;
-        const Video = (p) => <IconBase {...p}><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></IconBase>;
-        const MapIcon = (p) => <IconBase {...p}><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" x2="9" y1="3" y2="18"/><line x1="15" x2="15" y1="6" y2="21"/></IconBase>;
-        const Calendar = (p) => <IconBase {...p}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></IconBase>;
-        const Locate = (p) => <IconBase {...p}><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><circle cx="12" cy="12" r="7"/></IconBase>;
+      if (!weatherRes.ok) throw new Error("Weather service unavailable");
+      
+      const weatherData = await weatherRes.json();
+      const marineData = await marineRes.ok ? await marineRes.json() : null;
+      const aqiData = await aqiRes.ok ? await aqiRes.json() : null;
 
-        // --- CONSTANTS ---
-        const HCMC_CENTER = [10.7769, 106.7009];
-        const HCMC_BOUNDS = [[10.3500, 106.3000], [11.1600, 107.0200]];
-        const TIDE_STATION_COORDS = { lat: 10.34, lng: 107.08 };
-        const SEARCH_VIEWBOX = "106.3,11.2,106.95,10.3";
+      const current = weatherData.current;
+      const hourly = weatherData.hourly;
+      
+      const aqi = aqiData && aqiData.current ? aqiData.current.us_aqi : 50; 
+      
+      const currentHour = new Date().getHours();
+      const uvIndex = hourly.uv_index[currentHour] || 0;
+      const currentRain = current.rain || 0;
+      const nextHourRainProb = hourly.precipitation_probability ? hourly.precipitation_probability[currentHour + 1] : 0;
+      const nextHourRainAmount = hourly.precipitation ? hourly.precipitation[currentHour + 1] : 0; 
 
-        const FLOOD_HOTSPOTS = [
-            { name: "Nguyen Huu Canh", lat: 10.7925, lng: 106.7163, desc: "Severe flooding during heavy rain" },
-            { name: "Thao Dien", lat: 10.8033, lng: 106.7329, desc: "High tide risk area" },
-            { name: "Huynh Tan Phat", lat: 10.7431, lng: 106.7336, desc: "Major tidal flooding zone" },
-            { name: "Tran Xuan Soan", lat: 10.7533, lng: 106.7029, desc: "Canal overflow risk" },
-            { name: "Le Van Luong", lat: 10.7167, lng: 106.6978, desc: "Low-lying area" }
-        ];
+      let tideData = [];
+      if (marineData && marineData.daily) {
+        const highs = marineData.daily.tide_high.slice(0, 2);
+        const lows = marineData.daily.tide_low.slice(0, 2);
+        const formatTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        
+        if (highs.length > 0 && lows.length > 0) {
+            const shiftTime = (iso) => {
+                const d = new Date(iso);
+                d.setHours(d.getHours() + 4);
+                return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+            };
 
-        const THEMES = {
-            dark: { name: 'dark', bg: 'bg-slate-950', textMain: 'text-slate-100', textSub: 'text-slate-400', cardBg: 'bg-slate-900', cardBorder: 'border-slate-800', inputBg: 'bg-slate-800', inputBorder: 'border-slate-700', accentPrimary: 'text-blue-400', buttonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white', buttonSecondary: 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750', highlight: 'bg-blue-900/30 text-blue-300 border-blue-800/50', mapFilter: 'brightness(0.8) contrast(1.2)' },
-            light: { name: 'light', bg: 'bg-lime-50', textMain: 'text-stone-800', textSub: 'text-stone-500', cardBg: 'bg-white', cardBorder: 'border-lime-100', inputBg: 'bg-stone-50', inputBorder: 'border-stone-200', accentPrimary: 'text-lime-700', buttonPrimary: 'bg-lime-700 hover:bg-lime-800 text-white', buttonSecondary: 'bg-white border-lime-200 text-lime-700 hover:bg-lime-50', highlight: 'bg-lime-100 text-lime-800 border-lime-200', mapFilter: 'none' }
-        };
-
-        function App() {
-            const [address, setAddress] = useState('');
-            const [isDarkMode, setIsDarkMode] = useState(false);
-            const [suggestions, setSuggestions] = useState([]); 
-            const [showSuggestions, setShowSuggestions] = useState(false); 
-            const [loading, setLoading] = useState(false);
-            const [error, setError] = useState(null);
-            const [data, setData] = useState(null);
-            const [mapInstance, setMapInstance] = useState(null);
-            const [leafletLoaded, setLeafletLoaded] = useState(false);
-            const [isPinMode, setIsPinMode] = useState(false);
-            const [currentTime, setCurrentTime] = useState('');
+            highs.forEach(t => tideData.push({ type: 'High', time: shiftTime(t), height: '3.5m' })); 
+            lows.forEach(t => tideData.push({ type: 'Low', time: shiftTime(t), height: '1.1m' }));
             
-            const theme = isDarkMode ? THEMES.dark : THEMES.light;
-            const mapRef = useRef(null);
-            const markerRef = useRef(null);
-            const circleRef = useRef(null);
-            const hotspotMarkersRef = useRef([]); 
-            const searchContainerRef = useRef(null);
-            const debounceTimerRef = useRef(null); 
+            tideData.sort((a, b) => new Date('1970/01/01 ' + a.time) - new Date('1970/01/01 ' + b.time));
+        } else {
+            tideData = generateTideFallback();
+        }
+      } else {
+        tideData = generateTideFallback(); 
+      }
 
-            // --- Service Worker ---
-            useEffect(() => {
-                if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.protocol === 'http:')) {
-                    navigator.serviceWorker.register('/service-worker.js').then(r => r.update()).catch(err => console.log('SW Reg Skipped'));
-                }
-            }, []);
+      const newsUpdates = generateNewsUpdates(currentRain, nextHourRainProb);
 
-            // --- Clock ---
-            useEffect(() => {
-                const updateTime = () => {
-                    const now = new Date();
-                    const options = { timeZone: 'Asia/Ho_Chi_Minh', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
-                    setCurrentTime(now.toLocaleString('en-US', options));
-                };
-                updateTime();
-                const interval = setInterval(updateTime, 60000); 
-                return () => clearInterval(interval);
-            }, []);
+      setData({
+        location: formattedAddress,
+        coords: { lat, lng },
+        weather: {
+          temp: current.temperature_2m,
+          feelsLike: current.apparent_temperature,
+          humidity: current.relative_humidity_2m,
+          rain: currentRain,
+          nextHourProb: nextHourRainProb,
+          nextHourAmount: nextHourRainAmount, 
+          uv: uvIndex,
+          aqi: aqi,
+          code: current.weather_code
+        },
+        tides: tideData,
+        news: newsUpdates
+      });
+    } catch (err) {
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            useEffect(() => {
-                const handleClickOutside = (event) => {
-                    if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) setShowSuggestions(false);
-                };
-                document.addEventListener("mousedown", handleClickOutside);
-                return () => document.removeEventListener("mousedown", handleClickOutside);
-            }, []);
+  // --- MY LOCATION LOGIC ---
+  const handleGetLocation = () => {
+    if (!navigator.geolocation) {
+        setError("Geolocation is not supported by your browser");
+        return;
+    }
+    
+    setLoading(true);
+    setError(null);
 
-            const getStatusColor = (value, type) => {
-                if (isDarkMode) return 'text-slate-100'; 
-                const SAFE = 'text-lime-600'; const WARN = 'text-orange-500'; const DANGER = 'text-red-600';
-                switch (type) {
-                    case 'rain': if (value > 30) return DANGER; if (value > 5) return WARN; return SAFE;
-                    case 'aqi': if (value > 150) return DANGER; if (value > 100) return WARN; return SAFE;
-                    case 'uv': if (value > 8) return DANGER; if (value > 5) return WARN; return SAFE;
-                    case 'tide': if (parseFloat(value) > 3.5) return DANGER; if (parseFloat(value) > 2.5) return WARN; return SAFE;
-                    case 'temp': if (value > 35) return DANGER; return SAFE;
-                    case 'humidity': if (value > 90) return DANGER; if (value > 75) return WARN; return SAFE; 
-                    case 'canal': if (value > 2.0) return DANGER; if (value > 1.5) return WARN; return SAFE;
-                    default: return theme.textMain;
-                }
-            };
+    navigator.geolocation.getCurrentPosition(
+        async (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
 
-            // Load Leaflet
-            useEffect(() => {
-                const checkL = setInterval(() => {
-                    if (window.L) { setLeafletLoaded(true); clearInterval(checkL); }
-                }, 200);
-                return () => clearInterval(checkL);
-            }, []);
+            // Bounds check
+            if (lat < HCMC_BOUNDS[0][0] || lat > HCMC_BOUNDS[1][0] || 
+                lng < HCMC_BOUNDS[0][1] || lng > HCMC_BOUNDS[1][1]) {
+                setError("You seem to be outside Ho Chi Minh City.");
+                setLoading(false);
+                return;
+            }
 
-            // Initialize Map
-            useEffect(() => {
-                if (!leafletLoaded || !mapRef.current || mapInstance) return;
-                if (!window.L) return;
-                try {
-                    const map = window.L.map(mapRef.current, { center: HCMC_CENTER, zoom: 11, minZoom: 10, maxBounds: HCMC_BOUNDS, maxBoundsViscosity: 1.0 });
-                    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(map);
-                    FLOOD_HOTSPOTS.forEach(spot => {
-                        const marker = window.L.circleMarker([spot.lat, spot.lng], { color: 'red', fillColor: '#f03', fillOpacity: 0.5, radius: 8 }).addTo(map);
-                        marker.bindPopup(`<b>${spot.name}</b><br>${spot.desc}`);
-                        hotspotMarkersRef.current.push(marker);
-                    });
-                    setTimeout(() => map.invalidateSize(), 500);
-                    setMapInstance(map);
-                } catch (err) { console.error(err); }
-                return () => { if (mapInstance) { mapInstance.remove(); setMapInstance(null); } };
-            }, [leafletLoaded]);
-
-            // Pin Mode Cursor
-            useEffect(() => {
-                if (!mapInstance) return;
-                const container = mapInstance.getContainer();
-                if (isPinMode) { container.classList.add('crosshair-active'); container.style.cursor = 'crosshair'; } 
-                else { container.classList.remove('crosshair-active'); container.style.cursor = ''; }
-                const onMapClick = async (e) => {
-                    if (!isPinMode) return;
-                    const { lat, lng } = e.latlng;
-                    if (lat < HCMC_BOUNDS[0][0] || lat > HCMC_BOUNDS[1][0] || lng < HCMC_BOUNDS[0][1] || lng > HCMC_BOUNDS[1][1]) {
-                        setError("Please select a location inside Ho Chi Minh City."); return;
-                    }
-                    setIsPinMode(false); setLoading(true); setError(null); setSuggestions([]); 
-                    try {
-                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
-                        const data = await res.json();
-                        let formattedAddr = formatAddress(data.address, false);
-                        if (!formattedAddr) formattedAddr = `Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
-                        setAddress(formattedAddr); 
-                        await fetchEnvironmentalData(lat, lng, formattedAddr);
-                    } catch (err) { setError("Failed to retrieve location data."); setLoading(false); }
-                };
-                mapInstance.on('click', onMapClick);
-                return () => { mapInstance.off('click', onMapClick); container.classList.remove('crosshair-active'); container.style.cursor = ''; };
-            }, [mapInstance, isPinMode]);
-
-            // Update Map Visuals
-            useEffect(() => {
-                if (!mapInstance || !data || !window.L) return;
-                const { lat, lng } = data.coords;
-                mapInstance.setView([lat, lng], 14);
-                if (markerRef.current) mapInstance.removeLayer(markerRef.current);
-                if (circleRef.current) mapInstance.removeLayer(circleRef.current);
-                const newMarker = window.L.marker([lat, lng]).addTo(mapInstance);
-                newMarker.bindPopup(`<b>${data.location}</b>`).openPopup();
-                markerRef.current = newMarker;
-                const newCircle = window.L.circle([lat, lng], { color: isDarkMode ? '#3b82f6' : '#65a30d', fillColor: isDarkMode ? '#3b82f6' : '#65a30d', fillOpacity: 0.1, radius: 5000 }).addTo(mapInstance);
-                circleRef.current = newCircle;
-                mapInstance.panTo([lat, lng]);
-                setTimeout(() => mapInstance.invalidateSize(), 200);
-            }, [data, mapInstance, isDarkMode]);
-
-            // --- STRICT ADDRESS FILTER ---
-            const formatAddress = (addrObj, strictHCMC = true) => {
-                if (!addrObj) return null;
-                const fullStr = JSON.stringify(addrObj).toLowerCase();
-
-                if (fullStr.includes("vũng tàu") || fullStr.includes("bà rịa") || fullStr.includes("đồng nai") || fullStr.includes("bình dương") || fullStr.includes("long an")) return null;
-
-                if (strictHCMC) {
-                    const city = addrObj.city || "";
-                    const state = addrObj.state || "";
-                    const province = addrObj.province || "";
-                    const county = addrObj.county || "";
-                    const allAdmin = `${city} ${state} ${province} ${county}`.toLowerCase();
-                    if (!allAdmin.includes("hồ chí minh") && !allAdmin.includes("ho chi minh") && !allAdmin.includes("saigon")) {
-                        return null;
-                    }
-                }
-
-                const street = addrObj.road || addrObj.street || addrObj.pedestrian;
-                if (!street) return null;
-
-                let ward = addrObj.quarter || addrObj.ward || addrObj.neighbourhood || addrObj.suburb || addrObj.residential; 
-                if (ward && !ward.toLowerCase().includes('phường') && !ward.toLowerCase().startsWith('p.')) ward = `Phường ${ward}`;
-                const district = addrObj.city_district || addrObj.district || addrObj.suburb;
-                const parts = [street, ward, district].filter(Boolean);
-                return parts.length > 0 ? parts.join(', ') : null;
-            };
-
-            // --- NEW: GEOLOCATION HANDLER ---
-            const handleLocateMe = () => {
-                if (!navigator.geolocation) {
-                    setError("Geolocation is not supported by your browser");
-                    return;
-                }
-                setLoading(true);
-                setError(null);
+            try {
+                // Reverse geocode to get name
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
+                const data = await res.json();
+                const formattedAddr = formatAddress(data.address);
                 
-                navigator.geolocation.getCurrentPosition(async (position) => {
-                    const { latitude, longitude } = position.coords;
-                    
-                    // Bounds Check
-                    if (latitude < HCMC_BOUNDS[0][0] || latitude > HCMC_BOUNDS[1][0] || longitude < HCMC_BOUNDS[0][1] || longitude > HCMC_BOUNDS[1][1]) {
-                        setError("You are currently outside Ho Chi Minh City.");
-                        setLoading(false);
-                        return;
-                    }
+                await fetchEnvironmentalData(lat, lng, formattedAddr);
+            } catch (err) {
+                setError("Failed to fetch location data.");
+                setLoading(false);
+            }
+        },
+        () => {
+            setError("Unable to retrieve your location");
+            setLoading(false);
+        }
+    );
+  };
 
-                    try {
-                        // Reverse Geocode
-                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`);
-                        const data = await res.json();
-                        
-                        let formattedAddr = formatAddress(data.address, false); // Relaxed check for current location
-                        if (!formattedAddr) formattedAddr = `Current Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
-                        
-                        setAddress(formattedAddr);
-                        await fetchEnvironmentalData(latitude, longitude, formattedAddr);
-                    } catch (err) {
-                        setError("Could not retrieve your location details.");
-                        setLoading(false);
-                    }
-                }, (err) => {
-                    setError("Unable to retrieve your location. Please allow GPS access.");
-                    setLoading(false);
-                });
-            };
+  // --- MAP PIN LOGIC ---
+  useEffect(() => {
+    if (!mapInstance) return;
+    const container = mapInstance.getContainer();
+    if (isPinMode) {
+        container.classList.add('crosshair-active');
+        container.style.cursor = 'crosshair';
+    } else {
+        container.classList.remove('crosshair-active');
+        container.style.cursor = '';
+    }
 
-            const fetchEnvironmentalData = async (lat, lng, formattedAddress) => {
-                try {
-                    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&hourly=uv_index,precipitation_probability,precipitation&daily=uv_index_max&air_quality=us_aqi&timezone=Asia%2FHo_Chi_Minh`);
-                    const marineRes = await fetch(`https://marine-api.open-meteo.com/v1/marine?latitude=${TIDE_STATION_COORDS.lat}&longitude=${TIDE_STATION_COORDS.lng}&daily=tide_high,tide_low&timezone=Asia%2FHo_Chi_Minh`);
-                    const aqiRes = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&current=us_aqi&timezone=Asia%2FHo_Chi_Minh`);
-                    
-                    if (!weatherRes.ok) throw new Error("Weather service unavailable");
-                    const weatherData = await weatherRes.json();
-                    const marineData = await marineRes.ok ? await marineRes.json() : null;
-                    const aqiData = await aqiRes.ok ? await aqiRes.json() : null;
-
-                    const current = weatherData.current;
-                    const hourly = weatherData.hourly;
-                    const aqi = aqiData && aqiData.current ? aqiData.current.us_aqi : 50; 
-                    const currentHour = new Date().getHours();
-                    const uvIndex = hourly.uv_index[currentHour] || 0;
-                    const currentRain = current.rain || 0;
-                    const nextHourRainProb = hourly.precipitation_probability ? hourly.precipitation_probability[currentHour + 1] : 0;
-                    const nextHourRainAmount = hourly.precipitation ? hourly.precipitation[currentHour + 1] : 0; 
-
-                    let tideData = [];
-                    if (marineData && marineData.daily) {
-                        const highs = marineData.daily.tide_high.slice(0, 2);
-                        const lows = marineData.daily.tide_low.slice(0, 2);
-                        const formatTime = (iso) => {
-                            const d = new Date(iso);
-                            d.setHours(d.getHours() + 4); 
-                            return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-                        };
-                        if (highs.length > 0 && lows.length > 0) {
-                            highs.forEach(t => tideData.push({ type: 'High', time: formatTime(t), height: '3.5m' })); 
-                            lows.forEach(t => tideData.push({ type: 'Low', time: formatTime(t), height: '1.1m' }));
-                            tideData.sort((a, b) => new Date('1970/01/01 ' + a.time) - new Date('1970/01/01 ' + b.time));
-                        } else { tideData = generateTideFallback(); }
-                    } else { tideData = generateTideFallback(); }
-
-                    const newsUpdates = generateNewsUpdates(currentRain, nextHourRainProb);
-                    setData({
-                        location: formattedAddress, coords: { lat, lng },
-                        weather: { temp: current.temperature_2m, feelsLike: current.apparent_temperature, humidity: current.relative_humidity_2m, rain: currentRain, nextHourProb: nextHourRainProb, nextHourAmount: nextHourRainAmount, uv: uvIndex, aqi: aqi, code: current.weather_code },
-                        tides: tideData, news: newsUpdates
-                    });
-                } catch (err) { throw err; } finally { setLoading(false); }
-            };
-
-            const handleInputChange = (e) => {
-                const value = e.target.value; setAddress(value);
-                if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-                if (!value.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
-                debounceTimerRef.current = setTimeout(async () => {
-                    try { 
-                        // Limit 20 to allow filtering
-                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&viewbox=${SEARCH_VIEWBOX}&bounded=1&countrycodes=vn&limit=20&addressdetails=1&_t=${Date.now()}`); 
-                        if (res.ok) { 
-                            const rawResults = await res.json();
-                            const uniqueResults = [];
-                            const seenAddresses = new Set();
-                            rawResults.forEach(item => {
-                                const fmt = formatAddress(item.address, true);
-                                if (fmt && !seenAddresses.has(fmt)) {
-                                    seenAddresses.add(fmt);
-                                    item.formatted_display = fmt;
-                                    uniqueResults.push(item);
-                                }
-                            });
-                            setSuggestions(uniqueResults.slice(0, 5)); setShowSuggestions(true); 
-                        } 
-                    } catch (err) {}
-                }, 500);
-            };
-
-            const handleSuggestionClick = async (s) => { 
-                const f = s.formatted_display; setAddress(f); setShowSuggestions(false); setSuggestions([]); setLoading(true); setError(null); 
-                try { await fetchEnvironmentalData(parseFloat(s.lat), parseFloat(s.lon), f); } catch (e) { setError(e.message); setLoading(false); } 
-            };
-
-            const handleSearch = async (e) => { 
-                e.preventDefault(); if(!address.trim()) return; setLoading(true); setShowSuggestions(false); 
-                try { 
-                    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=${SEARCH_VIEWBOX}&bounded=1&countrycodes=vn&addressdetails=1`); 
-                    const d = await r.json(); 
-                    if(!d.length) throw new Error("Not found in HCMC"); 
-                    const validLoc = d.find(loc => formatAddress(loc.address, true) !== null);
-                    if (!validLoc) throw new Error("Address not found in Ho Chi Minh City.");
-                    await fetchEnvironmentalData(parseFloat(validLoc.lat), parseFloat(validLoc.lon), formatAddress(validLoc.address, true)); 
-                } catch (e) { setError(e.message); setLoading(false); } 
-            };
-
-            const generateNewsUpdates = (rain, nextProb) => {
-                const updates = [];
-                updates.push({ source: 'Official Traffic Map', type: 'traffic-button', url: 'https://giaothong.hochiminhcity.gov.vn/' });
-                if (rain > 10 || nextProb > 60) updates.push({ source: 'Hydro-Met Service', time: 'Alert', text: 'Heavy rain predicted. Check flood zones.', type: 'warning', url: 'https://nchmf.gov.vn/' });
-                else updates.push({ source: 'Hydro-Met Service', time: 'Today', text: 'Normal weather conditions reported.', type: 'info', url: 'https://nchmf.gov.vn/' });
-                return updates;
-            };
-
-            const generateTideFallback = () => {
-                const today = new Date().getDate();
-                const shift = today * 48; 
-                const baseH = 4 * 60 + 30 + shift; 
-                const getHmm = (mins) => {
-                    const h = Math.floor((mins % 1440) / 60);
-                    const m = mins % 60;
-                    const ampm = h >= 12 ? 'PM' : 'AM';
-                    const h12 = h % 12 || 12;
-                    return `${h12}:${m.toString().padStart(2,'0')} ${ampm}`;
-                };
-                return [
-                    { type: 'High', time: getHmm(baseH), height: '3.4m' },
-                    { type: 'Low', time: getHmm(baseH + 372), height: '1.1m' },
-                    { type: 'High', time: getHmm(baseH + 744), height: '3.9m' },
-                    { type: 'Low', time: getHmm(baseH + 1116), height: '0.8m' }
-                ];
-            };
-
-            const getWeatherIcon = (code) => {
-                const colorClass = isDarkMode ? 'text-yellow-500' : 'text-lime-700';
-                if (code <= 3) return <Activity className={colorClass} size={24} />;
-                if (code <= 67) return <CloudRain className={theme.accentPrimary} size={24} />;
-                return <AlertTriangle className={theme.textSub} size={24} />;
-            };
-
-            return (
-                <div className={`min-h-screen font-sans flex flex-col transition-colors duration-300 ${theme.bg} ${theme.textMain}`}>
-                    <style>{` .leaflet-container { width: 100% !important; height: 100% !important; min-height: 500px; border-radius: 0.5rem; z-index: 1; filter: ${theme.mapFilter}; } 
-                    .crosshair-active, .crosshair-active .leaflet-interactive { cursor: crosshair !important; } `}</style>
-
-                    <header className={`${theme.cardBg} shadow-sm border-b ${theme.cardBorder} px-4 py-3 md:px-6 md:py-4 flex items-center justify-between z-20 sticky top-0`}>
-                        <div className="flex items-center gap-2 md:gap-3">
-                            <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-1.5 md:p-2 rounded-lg text-white shadow-lg`}><MapPin size={18} className="md:w-5 md:h-5" /></div>
-                            <div>
-                                <h1 className={`text-lg md:text-xl tracking-tight font-bold ${isDarkMode ? 'text-white' : 'text-black'}`}>Stay Dry</h1>
-                                <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase`}><div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>Ho Chi Minh City</div>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <a href="https://paypal.me/sivarajpragasm" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 md:gap-2 px-3 py-1.5 md:py-2 rounded-full bg-[#0070BA] text-white text-[10px] md:text-xs font-bold hover:bg-[#003087] shadow-sm"><Heart size={12} className="fill-white"/> Donate</a>
-                            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-1.5 md:p-2 rounded-full border ${theme.cardBorder} ${theme.textSub} hover:${theme.bg}`}>{isDarkMode ? <Sun size={16}/> : <Moon size={16}/>}</button>
-                        </div>
-                    </header>
-
-                    <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full gap-6 grid grid-cols-1 lg:grid-cols-3">
-                        <div className="lg:col-span-1 flex flex-col gap-4">
-                            <div ref={searchContainerRef} className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} relative z-30`}>
-                                <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-stone-500">
-                                   <Calendar size={14} className={theme.accentPrimary} />
-                                   <span>{currentTime || "Loading..."}</span>
-                                </div>
-                                <div className="flex gap-2">
-                                    <form onSubmit={handleSearch} className="relative flex-1">
-                                        <input type="text" value={address} onChange={handleInputChange} placeholder="Street, Ward..." className={`w-full pl-9 pr-3 py-3 ${theme.inputBg} border ${theme.inputBorder} rounded-lg text-sm ${theme.textMain} focus:outline-none`} />
-                                        <Search className={`absolute left-3 top-3.5 ${theme.textSub}`} size={16} />
-                                        <button type="submit" disabled={loading} className={`absolute right-2 top-2 p-1.5 rounded-md ${theme.buttonPrimary} disabled:opacity-50`}>{loading ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"/> : <Navigation size={16} />}</button>
-                                        {showSuggestions && suggestions.length > 0 && <div className={`absolute top-full left-0 right-0 mt-1 ${theme.cardBg} border ${theme.cardBorder} rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto`}>{suggestions.map((item, i) => <div key={i} onClick={() => handleSuggestionClick(item)} className={`p-3 hover:${theme.inputBg} cursor-pointer border-b ${theme.cardBorder} text-sm`}>{item.formatted_display}</div>)}</div>}
-                                    </form>
-                                    
-                                    {/* LOCATE ME BUTTON (NEW) */}
-                                    <button onClick={handleLocateMe} className={`p-3 rounded-lg border ${theme.buttonSecondary} hover:bg-blue-50 text-blue-600`} title="Use Current Location">
-                                        <Locate size={20} />
-                                    </button>
-                                    
-                                    <button onClick={() => setIsPinMode(!isPinMode)} className={`p-3 rounded-lg border ${isPinMode ? theme.highlight : theme.buttonSecondary}`}><Crosshair size={20} /></button>
-                                </div>
-                                {isPinMode && <div className={`mt-3 text-xs px-3 py-2 rounded border animate-pulse ${theme.highlight}`}>Click map to select.</div>}
-                                {error && <div className="mt-3 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100"><AlertTriangle size={16} className="inline mr-2"/>{error}</div>}
-                            </div>
-
-                            {!data && !loading && (
-                                <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}>
-                                    <MapPin size={48} className="mb-4 opacity-20" />
-                                    <p className="text-center text-sm">Search to check Rain, UV, and Tides.</p>
-                                    <span className="mt-4 text-[10px] opacity-50">v2.7</span>
-                                </div>
-                            )}
-
-                            {data && (
-                                <>
-                                    <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                                        <h2 className="text-lg font-bold leading-tight">{data.location}</h2>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
-                                            <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>TEMP</span>{getWeatherIcon(data.weather.code)}</div>
-                                            <div className={`text-2xl font-bold ${getStatusColor(data.weather.temp, 'temp')}`}>{data.weather.temp}°C</div>
-                                            <div className={`text-xs ${theme.textSub}`}>Feels {data.weather.feelsLike}°</div>
-                                        </div>
-                                        <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
-                                            <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>HUMIDITY</span><Droplets className={theme.accentPrimary} size={20}/></div>
-                                            <div className={`text-2xl font-bold ${getStatusColor(data.weather.humidity, 'humidity')}`}>{data.weather.humidity}%</div>
-                                        </div>
-                                    </div>
-
-                                    <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                                        <div className="flex items-center gap-2 mb-3"><CloudRain size={18} className={theme.accentPrimary} /><span className="font-semibold">Rain Status</span></div>
-                                        <div className="flex items-end gap-2 mb-2"><span className={`text-3xl font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain}</span><span className={`text-sm ${theme.textSub} mb-1`}>mm current</span></div>
-                                        <div className="grid grid-cols-2 gap-2 text-xs">
-                                            <div className={`p-2 rounded border ${theme.inputBorder} ${theme.inputBg}`}>
-                                                <div className={theme.textSub}>Next Hour</div>
-                                                <div className={`font-bold ${data.weather.nextHourProb > 50 ? 'text-orange-500' : 'text-lime-600'}`}>{data.weather.nextHourProb}% Chance</div>
-                                            </div>
-                                            <div className={`p-2 rounded border ${theme.inputBorder} ${theme.inputBg}`}>
-                                                <div className={theme.textSub}>Exp. Volume</div>
-                                                <div className="font-bold">{data.weather.nextHourAmount} mm</div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                                            <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>UV INDEX</span><Sun size={20} className={getStatusColor(data.weather.uv, 'uv')}/></div>
-                                            <div className={`text-2xl font-bold ${getStatusColor(data.weather.uv, 'uv')}`}>{data.weather.uv.toFixed(1)}</div>
-                                            <div className="text-[10px] text-slate-400">{data.weather.uv > 7 ? 'High' : 'Low'}</div>
-                                        </div>
-                                        <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                                            <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>AIR (AQI)</span><Wind size={20} className={getStatusColor(data.weather.aqi, 'aqi')}/></div>
-                                            <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi || "--"}</div>
-                                            <div className="text-[10px] text-slate-400">US Standard</div>
-                                        </div>
-                                    </div>
-
-                                    <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                                        <div className="flex gap-2 mb-3"><Newspaper size={18} className="text-pink-500"/><span className="font-semibold">Official Updates</span></div>
-                                        <div className="space-y-2">
-                                            {data.news.map((item, i) => (
-                                                item.type === 'traffic-button' ? (
-                                                    <a key={i} href={item.url} target="_blank" className={`flex items-center justify-center gap-2 w-full p-3 rounded-lg font-bold text-white text-sm ${theme.buttonPrimary} mb-3 shadow-sm`}>
-                                                        <Video size={16} /> Live Traffic Cameras
-                                                    </a>
-                                                ) : (
-                                                    <a key={i} href={item.url} target="_blank" className={`block p-3 rounded border text-xs hover:opacity-75 ${item.type === 'alert' ? 'bg-red-50 border-red-100' : `${theme.inputBg} ${theme.inputBorder}`}`}>
-                                                        <div className="flex justify-between mb-1">
-                                                            <span className={`font-bold flex items-center ${item.type === 'alert' ? 'text-red-600' : theme.textSub}`}>{item.source}<ExternalLink size={10} className="ml-1 opacity-50"/></span>
-                                                            <span className={theme.textSub}>{item.time}</span>
-                                                        </div>
-                                                        <p>{item.text}</p>
-                                                    </a>
-                                                )
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                                        <div className="flex gap-2 mb-3"><Waves size={18} className={theme.accentPrimary}/><span className="font-semibold">Tides (Saigon River)</span></div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="flex flex-col gap-2">
-                                                <div className={`text-xs font-bold text-center ${theme.textSub} pb-1 border-b ${theme.cardBorder}`}>LOW</div>
-                                                {data.tides.filter(t => t.type === 'Low').map((t, i) => (
-                                                    <div key={i} className={`${theme.inputBg} p-2 rounded text-center border ${theme.inputBorder}`}>
-                                                        <div className="font-bold text-sm">{t.time}</div>
-                                                        <div className={`text-xs font-bold ${getStatusColor(t.height.replace('m',''), 'tide')}`}>{t.height}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className="flex flex-col gap-2">
-                                                <div className={`text-xs font-bold text-center ${theme.accentPrimary} pb-1 border-b ${theme.cardBorder}`}>HIGH</div>
-                                                {data.tides.filter(t => t.type === 'High').map((t, i) => (
-                                                    <div key={i} className={`${theme.inputBg} p-2 rounded text-center border ${theme.inputBorder}`}>
-                                                        <div className="font-bold text-sm">{t.time}</div>
-                                                        <div className={`text-xs font-bold ${getStatusColor(t.height.replace('m',''), 'tide')}`}>{t.height}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-
-                        <div className={`lg:col-span-2 h-[400px] lg:h-auto rounded-xl shadow-inner border ${theme.cardBorder} relative overflow-hidden`}>
-                            <div id="map" ref={mapRef} style={{ minHeight: '500px', width: '100%', height: '100%' }} />
-                            <div className={`absolute bottom-4 right-4 ${isDarkMode ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur p-3 rounded-lg shadow-lg text-xs z-[400] border ${theme.cardBorder}`}>
-                                <h4 className="font-bold mb-2">Legend</h4>
-                                <div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm"></div><span className={theme.textSub}>Your Location</span></div>
-                                <div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 opacity-50"></div><span className={theme.textSub}>Known Flood Zone</span></div>
-                                <div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full ${isDarkMode ? 'bg-blue-500' : 'bg-lime-600'} opacity-20 border`}></div><span className={theme.textSub}>5km Radius</span></div>
-                            </div>
-                        </div>
-                    </main>
-                </div>
-            );
+    const onMapClick = async (e) => {
+        if (!isPinMode) return;
+        const { lat, lng } = e.latlng;
+        
+        if (lat < HCMC_BOUNDS[0][0] || lat > HCMC_BOUNDS[1][0] || 
+            lng < HCMC_BOUNDS[0][1] || lng > HCMC_BOUNDS[1][1]) {
+            setError("Please select a location inside Ho Chi Minh City.");
+            return;
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+        setIsPinMode(false); 
+        setLoading(true);
+        setError(null);
+
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
+            const data = await res.json();
+            const formattedAddr = formatAddress(data.address);
+            await fetchEnvironmentalData(lat, lng, formattedAddr);
+        } catch (err) {
+            setError("Failed to retrieve data.");
+            setLoading(false);
+        }
+    };
+
+    mapInstance.on('click', onMapClick);
+    return () => {
+        mapInstance.off('click', onMapClick);
+        container.classList.remove('crosshair-active');
+        container.style.cursor = '';
+    };
+  }, [mapInstance, isPinMode]);
+
+  const generateNewsUpdates = (rain, nextProb) => {
+    const updates = [];
+    updates.push({ 
+        source: 'Official Traffic Map', 
+        type: 'traffic-button', 
+        url: 'https://giaothong.hochiminhcity.gov.vn/'
+    });
+    if (rain > 10 || nextProb > 60) updates.push({ source: 'Hydro-Met Service', time: 'Alert', text: 'Heavy rain predicted. Check flood zones.', type: 'warning', url: 'https://nchmf.gov.vn/' });
+    else updates.push({ source: 'Hydro-Met Service', time: 'Today', text: 'Normal weather conditions reported.', type: 'info', url: 'https://nchmf.gov.vn/' });
+    return updates;
+  };
+
+  const generateTideFallback = () => {
+      const today = new Date().getDate();
+      const shift = today * 48; 
+      const baseH = 4 * 60 + 30 + shift; 
+      const getHmm = (mins) => {
+          const h = Math.floor((mins % 1440) / 60);
+          const m = mins % 60;
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          const h12 = h % 12 || 12;
+          return `${h12}:${m.toString().padStart(2,'0')} ${ampm}`;
+      };
+      return [
+        { type: 'High', time: getHmm(baseH), height: '3.4m' },
+        { type: 'Low', time: getHmm(baseH + 372), height: '1.1m' }, 
+        { type: 'High', time: getHmm(baseH + 744), height: '3.9m' }, 
+        { type: 'Low', time: getHmm(baseH + 1116), height: '0.8m' }  
+      ];
+  };
+
+  const getWeatherIcon = (code) => {
+    const colorClass = isDarkMode ? 'text-yellow-500' : 'text-lime-700';
+    if (code <= 3) return <Activity className={colorClass} size={24} />;
+    if (code <= 67) return <CloudRain className={theme.accentPrimary} size={24} />;
+    return <AlertTriangle className={theme.textSub} size={24} />;
+  };
+
+  return (
+    <div className={`min-h-screen font-sans flex flex-col transition-colors duration-300 ${theme.bg} ${theme.textMain}`}>
+      <style>{` 
+        .leaflet-container { width: 100% !important; height: 100% !important; min-height: 500px; border-radius: 0.5rem; z-index: 1; filter: ${theme.mapFilter}; } 
+        .crosshair-active, .crosshair-active .leaflet-interactive { cursor: crosshair !important; }
+      `}</style>
+
+      {/* Header */}
+      <header className={`${theme.cardBg} shadow-sm border-b ${theme.cardBorder} px-4 py-3 flex items-center justify-between z-20 sticky top-0`}>
+        <div className="flex items-center gap-2">
+          <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}><MapPin size={18}/></div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-stone-800 dark:text-white">Stay Dry</h1>
+            <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase`}><div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>Ho Chi Minh City</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <a href="https://paypal.me/sivarajpragasm" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#0070BA] text-white text-[10px] font-bold hover:bg-[#003087]"><Heart size={12} className="fill-white"/> Donate</a>
+          <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-1.5 rounded-full border ${theme.cardBorder} hover:${theme.bg}`}>{isDarkMode ? <Sun size={16}/> : <Moon size={16}/>}</button>
+        </div>
+      </header>
+
+      <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full gap-6 grid grid-cols-1 lg:grid-cols-3 h-auto">
+        <div className="lg:col-span-1 flex flex-col gap-4">
+          
+          {/* Time & Location Controls (NEW LAYOUT) */}
+          <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} relative z-30`}>
+            {/* Live Clock */}
+            <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-stone-500">
+               <Calendar size={14} className={theme.accentPrimary} />
+               <span>{currentTime || "Loading..."}</span>
+            </div>
+
+            <div className="flex gap-2">
+              <button 
+                onClick={handleGetLocation}
+                disabled={loading}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-bold text-white text-sm ${theme.buttonPrimary} shadow-sm transition-all active:scale-95`}
+              >
+                {loading ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"/> : <><Navigation size={16} /> Use My Location</>}
+              </button>
+              
+              <button 
+                onClick={() => setIsPinMode(!isPinMode)} 
+                className={`w-14 flex items-center justify-center rounded-lg border transition-all ${isPinMode ? theme.highlight : theme.buttonSecondary}`}
+                title="Pick on Map"
+              >
+                <Crosshair size={20} />
+              </button>
+            </div>
+
+            {isPinMode && <div className={`mt-3 text-xs px-3 py-2 rounded border animate-pulse ${theme.highlight}`}>Tap anywhere on the map to select.</div>}
+            {error && <div className="mt-3 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100"><AlertTriangle size={16} className="inline mr-2"/>{error}</div>}
+          </div>
+
+          {!data && !loading && (
+            <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}>
+              <MapPin size={48} className="mb-4 opacity-20" />
+              <p className="text-center text-sm">Use GPS or Pin to check Rain & Tides.</p>
+            </div>
+          )}
+
+          {data && (
+            <>
+              {/* Location */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <h2 className="text-lg font-bold leading-tight">{data.location}</h2>
+              </div>
+
+              {/* Weather Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
+                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>TEMP</span>{getWeatherIcon(data.weather.code)}</div>
+                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.temp, 'temp')}`}>{data.weather.temp}°C</div>
+                  <div className={`text-xs ${theme.textSub}`}>Feels {data.weather.feelsLike}°</div>
+                </div>
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
+                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>HUMIDITY</span><Droplets className={theme.accentPrimary} size={20} /></div>
+                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.humidity, 'humidity')}`}>{data.weather.humidity}%</div>
+                </div>
+              </div>
+
+              {/* Rain Card */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><CloudRain size={18} className={theme.accentPrimary}/><span className="font-semibold">Rain Status</span></div><span className={`text-xs font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain > 0 ? 'RAINING' : 'DRY'}</span></div>
+                <div className="flex items-end gap-2 mb-2"><span className={`text-3xl font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain}</span><span className={`text-sm ${theme.textSub} mb-1`}>mm current</span></div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className={`p-2 rounded border ${theme.inputBorder} ${theme.inputBg}`}>
+                        <div className={theme.textSub}>Next Hour</div>
+                        <div className={`font-bold ${data.weather.nextHourProb > 50 ? 'text-orange-500' : 'text-lime-600'}`}>{data.weather.nextHourProb}% Chance</div>
+                    </div>
+                    <div className={`p-2 rounded border ${theme.inputBorder} ${theme.inputBg}`}>
+                        <div className={theme.textSub}>Exp. Volume</div>
+                        <div className="font-bold">{data.weather.nextHourAmount} mm</div>
+                    </div>
+                </div>
+              </div>
+
+              {/* Commute Conditions */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>UV INDEX</span><Sun size={20} className={getStatusColor(data.weather.uv, 'uv')}/></div>
+                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.uv, 'uv')}`}>{data.weather.uv.toFixed(1)}</div>
+                  <div className="text-[10px] text-slate-400">{data.weather.uv > 7 ? 'High' : 'Low'}</div>
+                </div>
+                <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                  <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>AIR (AQI)</span><Wind size={20} className={getStatusColor(data.weather.aqi, 'aqi')}/></div>
+                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi}</div>
+                  <div className="text-[10px] text-slate-400">US Standard</div>
+                </div>
+              </div>
+
+              {/* Updates Section */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <div className="flex gap-2 mb-3"><Newspaper size={18} className="text-pink-500"/><span className="font-semibold">Official Updates</span></div>
+                {data.news.map((item, i) => (
+                    item.type === 'traffic-button' ? (
+                        <a key={i} href={item.url} target="_blank" className={`flex items-center justify-center gap-2 w-full p-3 rounded-lg font-bold text-white text-sm ${theme.buttonPrimary} mb-3 transition-colors shadow-sm`}>
+                            <Video size={16} /> Live Traffic Cameras
+                        </a>
+                    ) : (
+                        <a key={i} href={item.url} target="_blank" className={`block p-3 rounded border text-xs hover:opacity-75 ${item.type === 'alert' ? 'bg-red-50 border-red-100' : `${theme.inputBg} ${theme.inputBorder}`}`}>
+                            <div className="flex justify-between mb-1">
+                                <span className={`font-bold flex items-center ${item.type === 'alert' ? 'text-red-600' : theme.textSub}`}>{item.source}<ExternalLink size={10} className="ml-1 opacity-50"/></span>
+                                <span className={theme.textSub}>{item.time}</span>
+                            </div>
+                            <p>{item.text}</p>
+                        </a>
+                    )
+                ))}
+              </div>
+
+              {/* Tides (Saigon River) */}
+              <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
+                <div className="flex gap-2 mb-3"><Waves size={18} className={theme.accentPrimary}/><span className="font-semibold">Tides (Saigon River)</span></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-2">
+                    <div className={`text-xs font-bold text-center ${theme.textSub} pb-1 border-b ${theme.cardBorder}`}>LOW</div>
+                    {data.tides.filter(t => t.type === 'Low').map((t, i) => (
+                        <div key={i} className={`${theme.inputBg} p-2 rounded text-center border ${theme.inputBorder}`}>
+                            <div className="font-bold text-sm">{t.time}</div>
+                            <div className={`text-xs font-bold ${getStatusColor(t.height.replace('m',''), 'tide')}`}>{t.height}</div>
+                        </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className={`text-xs font-bold text-center ${theme.accentPrimary} pb-1 border-b ${theme.cardBorder}`}>HIGH</div>
+                    {data.tides.filter(t => t.type === 'High').map((t, i) => (
+                        <div key={i} className={`${theme.inputBg} p-2 rounded text-center border ${theme.inputBorder}`}>
+                            <div className="font-bold text-sm">{t.time}</div>
+                            <div className={`text-xs font-bold ${getStatusColor(t.height.replace('m',''), 'tide')}`}>{t.height}</div>
+                        </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Right Panel: Map */}
+        <div className={`lg:col-span-2 rounded-xl shadow-inner border ${theme.cardBorder} relative overflow-hidden`}>
+          <div id="map" ref={mapRef} style={{ minHeight: '500px', width: '100%', height: '100%' }} />
+          <div className={`absolute bottom-4 right-4 ${isDarkMode ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur p-3 rounded-lg shadow-lg text-xs z-[400] border ${theme.cardBorder}`}>
+             <h4 className="font-bold mb-2">Legend</h4>
+             <div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-sm"></div><span className={theme.textSub}>Your Location</span></div>
+             <div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 rounded-full bg-red-500 opacity-50"></div><span className={theme.textSub}>Known Flood Zone</span></div>
+             <div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full ${isDarkMode ? 'bg-blue-500' : 'bg-lime-600'} opacity-20 border`}></div><span className={theme.textSub}>5km Radius</span></div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  );
+}
