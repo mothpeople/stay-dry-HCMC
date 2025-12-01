@@ -11,27 +11,24 @@
 
     <title>Stay Dry HCMC</title>
     
-    <!-- SOCIAL TAGS -->
     <meta property="og:title" content="Stay Dry HCMC">
     <meta property="og:description" content="Real-time flood and weather monitoring for Ho Chi Minh City.">
     <meta property="og:image" content="https://stay-dry-hcmc.vercel.app/logo.png">
     <meta property="og:type" content="website">
 
-    <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#f7fee7">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="/logo.png">
 
-    <!-- Dependencies -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
         #map { min-height: 500px; height: 100%; width: 100%; z-index: 1; }
@@ -43,15 +40,41 @@
 <body class="bg-lime-50">
     <div id="root"></div>
 
+    <!-- CACHE BUSTER v=999 -->
     <script type="text/babel">
-        // --- REACT APP STARTS HERE ---
         const { useState, useEffect, useRef } = React;
 
-        // Icon Wrapper
+        // --- HARDCODED ICONS (100% Reliable - No External Library Needed) ---
+        const ICONS = {
+            mapPin: <><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></>,
+            search: <><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>,
+            navigation: <polygon points="3 11 22 2 13 21 11 13 3 11"/>,
+            crosshair: <><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></>,
+            calendar: <><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>,
+            activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>,
+            droplets: <><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.8-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></>,
+            cloudRain: <><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></>,
+            sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></>,
+            wind: <><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/></>,
+            newspaper: <><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8"/><path d="M10 10h8"/></>,
+            video: <><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2" ry="2"/></>,
+            waves: <><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></>,
+            layers: <><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></>,
+            heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>,
+            moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>,
+            alertTriangle: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
+            externalLink: <><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>
+        };
+
         const Icon = ({ name, size = 24, className, ...props }) => {
-            const iconName = name;
-            const iconData = window.lucide && window.lucide.icons ? window.lucide.icons[iconName] : null;
-            if (!iconData) return null;
+            // Mapping helper for Lucide name variants
+            const map = {
+                'map-pin': 'mapPin', 'cloud-rain': 'cloudRain', 'alert-triangle': 'alertTriangle', 'external-link': 'externalLink'
+            };
+            const key = map[name] || name;
+            const content = ICONS[key];
+            
+            if (!content) return null;
             return (
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -65,12 +88,13 @@
                     strokeLinejoin="round"
                     className={className}
                     {...props}
-                    dangerouslySetInnerHTML={{ __html: iconData.map(child => `<${child[0]} ${Object.entries(child[1]).map(([k, v]) => `${k}="${v}"`).join(' ')} />`).join('') }}
-                />
+                >
+                    {content}
+                </svg>
             );
         };
 
-        // Constants
+        // --- CONSTANTS ---
         const HCMC_CENTER = [10.7769, 106.7009];
         const HCMC_BOUNDS = [[10.3500, 106.3000], [11.1600, 107.0200]];
         const TIDE_STATION_COORDS = { lat: 10.34, lng: 107.08 }; // Vung Tau
@@ -105,6 +129,8 @@
         function App() {
             const [address, setAddress] = useState('');
             const [isDarkMode, setIsDarkMode] = useState(false);
+            const [suggestions, setSuggestions] = useState([]);
+            const [showSuggestions, setShowSuggestions] = useState(false);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState(null);
             const [data, setData] = useState(null);
@@ -116,6 +142,8 @@
             const mapRef = useRef(null);
             const markerRef = useRef(null);
             const circleRef = useRef(null);
+            const searchContainerRef = useRef(null);
+            const debounceTimerRef = useRef(null);
 
             // Clock
             useEffect(() => {
@@ -125,7 +153,19 @@
                     setCurrentTime(now.toLocaleString('en-US', options));
                 };
                 updateTime();
-                setInterval(updateTime, 60000);
+                const interval = setInterval(updateTime, 60000);
+                return () => clearInterval(interval);
+            }, []);
+
+            // Click Outside
+            useEffect(() => {
+                const handleClickOutside = (event) => {
+                    if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
+                        setShowSuggestions(false);
+                    }
+                };
+                document.addEventListener("mousedown", handleClickOutside);
+                return () => document.removeEventListener("mousedown", handleClickOutside);
             }, []);
 
             // Register Service Worker
@@ -157,18 +197,16 @@
                 try {
                     const map = window.L.map(mapRef.current, { center: HCMC_CENTER, zoom: 11, minZoom: 10, maxBounds: HCMC_BOUNDS, maxBoundsViscosity: 1.0 });
                     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(map);
-                    
                     FLOOD_HOTSPOTS.forEach(spot => {
                         const marker = window.L.circleMarker([spot.lat, spot.lng], { color: 'red', fillColor: '#f03', fillOpacity: 0.5, radius: 8 }).addTo(map);
                         marker.bindPopup(`<b>${spot.name}</b><br>${spot.desc}`);
                     });
-
                     setTimeout(() => map.invalidateSize(), 500);
                     setMapInstance(map);
                 } catch (err) { console.error(err); }
             }, []);
 
-            // Map Pin Mode
+            // Pin Logic
             useEffect(() => {
                 if (!mapInstance) return;
                 const container = mapInstance.getContainer();
@@ -184,29 +222,44 @@
                     if (!isPinMode) return;
                     setIsPinMode(false); setLoading(true); setError(null);
                     const { lat, lng } = e.latlng;
-                    
                     if (lat < HCMC_BOUNDS[0][0] || lat > HCMC_BOUNDS[1][0] || lng < HCMC_BOUNDS[0][1] || lng > HCMC_BOUNDS[1][1]) {
                         setError("Location outside Ho Chi Minh City."); setLoading(false); return;
                     }
-
                     try {
                         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
                         const data = await res.json();
                         await fetchEnvironmentalData(lat, lng, formatAddress(data.address));
                     } catch (err) { setError("Failed to retrieve data."); setLoading(false); }
                 };
-
                 mapInstance.on('click', onMapClick);
                 return () => mapInstance.off('click', onMapClick);
             }, [mapInstance, isPinMode]);
+
+            // Update Map View
+            useEffect(() => {
+                if (!mapInstance || !data) return;
+                const { lat, lng } = data.coords;
+                mapInstance.setView([lat, lng], 14);
+                if (markerRef.current) mapInstance.removeLayer(markerRef.current);
+                if (circleRef.current) mapInstance.removeLayer(circleRef.current);
+                markerRef.current = window.L.marker([lat, lng]).addTo(mapInstance).bindPopup(data.location).openPopup();
+                circleRef.current = window.L.circle([lat, lng], { color: isDarkMode ? '#3b82f6' : '#65a30d', fillColor: isDarkMode ? '#3b82f6' : '#65a30d', fillOpacity: 0.1, radius: 5000 }).addTo(mapInstance);
+                mapInstance.panTo([lat, lng]);
+                setTimeout(() => mapInstance.invalidateSize(), 200);
+            }, [data, mapInstance, isDarkMode]);
 
             const formatAddress = (addrObj) => {
                 if (!addrObj) return "Unknown Location";
                 const parts = new Set();
                 if (addrObj.road) parts.add(addrObj.road);
                 let ward = addrObj.ward || addrObj.quarter || "";
-                if (ward) { if (!ward.toLowerCase().includes('phường')) ward = `Phường ${ward}`; parts.add(ward); }
-                if (addrObj.city_district || addrObj.district) parts.add(addrObj.city_district || addrObj.district);
+                if (ward) { 
+                    if (!ward.toLowerCase().includes('phường')) ward = `Phường ${ward}`;
+                    parts.add(ward); 
+                }
+                if ((addrObj.city_district || addrObj.district) && addrObj.city_district !== "Ho Chi Minh City") {
+                    parts.add(addrObj.city_district || addrObj.district);
+                }
                 const res = Array.from(parts);
                 return res.length > 0 ? res.join(', ') : (addrObj.city || "Ho Chi Minh City");
             };
@@ -227,31 +280,31 @@
                     const aqi = aqiData?.current?.us_aqi || 50;
                     const curHour = new Date().getHours();
                     
-                    // Tides
                     let tideData = [];
                     if (marineData?.daily) {
                         const shiftTime = (iso) => {
                             const d = new Date(iso); d.setHours(d.getHours() + 4);
                             return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
                         };
-                        marineData.daily.tide_high.slice(0,2).forEach(t => tideData.push({ type: 'High', time: shiftTime(t), height: '3.5m' }));
-                        marineData.daily.tide_low.slice(0,2).forEach(t => tideData.push({ type: 'Low', time: shiftTime(t), height: '1.1m' }));
-                        tideData.sort((a, b) => new Date('1970/01/01 ' + a.time) - new Date('1970/01/01 ' + b.time));
+                        const highs = marineData.daily.tide_high.slice(0, 2);
+                        const lows = marineData.daily.tide_low.slice(0, 2);
+                        if (highs.length > 0) {
+                            highs.forEach(t => tideData.push({ type: 'High', time: shiftTime(t), height: '3.5m' }));
+                            lows.forEach(t => tideData.push({ type: 'Low', time: shiftTime(t), height: '1.1m' }));
+                            tideData.sort((a, b) => new Date('1970/01/01 ' + a.time) - new Date('1970/01/01 ' + b.time));
+                        } else {
+                            tideData = generateTideFallback();
+                        }
                     } else {
-                        // Fallback
-                        tideData = [
-                            { type: 'High', time: '04:30 AM', height: '3.4m' },
-                            { type: 'Low', time: '10:15 AM', height: '1.1m' },
-                            { type: 'High', time: '05:45 PM', height: '3.9m' },
-                            { type: 'Low', time: '11:30 PM', height: '0.8m' }
-                        ];
+                        tideData = generateTideFallback();
                     }
 
-                    // Risk Logic
                     const rain = current.rain;
                     let risk = "Low", score = 0;
                     if (rain > 5) score += 10;
                     if (rain > 30) score += 50;
+                    const canalLvl = 1.2 + (rain * 0.05);
+                    if (canalLvl > 2.0) score += 25;
                     if (score > 50) risk = "High"; else if (score > 20) risk = "Moderate";
 
                     setData({
@@ -265,23 +318,28 @@
                             uv: hourly.uv_index[curHour], aqi: aqi, code: current.weather_code
                         },
                         tides: tideData,
-                        flood: { level: risk, score: score, canalLevel: 1.2 },
+                        flood: { level: risk, score: score, canalLevel: canalLvl.toFixed(2) },
                         news: [
                             { source: 'Official Traffic Map', type: 'traffic-button', url: 'https://giaothong.hochiminhcity.gov.vn/' },
                             ...(rain > 10 ? [{ source: 'Hydro-Met', time: 'Alert', text: 'Heavy rain.', type: 'warning', url: 'https://nchmf.gov.vn/' }] : [])
                         ]
                     });
 
-                    // Update Map
-                    if (mapInstance) {
-                        mapInstance.setView([lat, lng], 14);
-                        if (markerRef.current) mapInstance.removeLayer(markerRef.current);
-                        if (circleRef.current) mapInstance.removeLayer(circleRef.current);
-                        markerRef.current = window.L.marker([lat, lng]).addTo(mapInstance).bindPopup(formattedAddress).openPopup();
-                        circleRef.current = window.L.circle([lat, lng], { color: '#65a30d', fillColor: '#65a30d', fillOpacity: 0.1, radius: 5000 }).addTo(mapInstance);
-                    }
-
                 } catch (e) { setError(e.message); } finally { setLoading(false); }
+            };
+
+            const generateTideFallback = () => {
+                const baseH = 4 * 60 + 30 + (new Date().getDate() * 48); 
+                const getHmm = (m) => {
+                    const h = Math.floor((m % 1440) / 60), min = m % 60;
+                    return `${h % 12 || 12}:${min.toString().padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}`;
+                };
+                return [
+                    { type: 'High', time: getHmm(baseH), height: '3.4m' },
+                    { type: 'Low', time: getHmm(baseH + 372), height: '1.1m' },
+                    { type: 'High', time: getHmm(baseH + 744), height: '3.9m' },
+                    { type: 'Low', time: getHmm(baseH + 1116), height: '0.8m' }
+                ];
             };
 
             const handleGetLocation = () => {
@@ -303,11 +361,56 @@
                 );
             };
 
+            const handleSearch = async (e) => {
+                e.preventDefault(); if(!address.trim()) return; setLoading(true); setShowSuggestions(false);
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=106.3,11.2,107.1,10.3&bounded=1&countrycodes=vn&addressdetails=1`);
+                    const d = await res.json();
+                    if(!d.length) throw new Error("Not found");
+                    await fetchEnvironmentalData(parseFloat(d[0].lat), parseFloat(d[0].lon), formatAddress(d[0].address));
+                } catch (e) { setError(e.message); setLoading(false); }
+            };
+
+            // Input Debounce
+            const handleInputChange = (e) => {
+                const val = e.target.value; setAddress(val);
+                if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+                if (!val.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
+                debounceTimerRef.current = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&viewbox=106.3,11.2,107.1,10.3&bounded=1&countrycodes=vn&limit=5&addressdetails=1`);
+                        if (res.ok) {
+                            const raw = await res.json();
+                            // Deduplication
+                            const unique = []; const seen = new Set();
+                            raw.forEach(item => {
+                                const f = formatAddress(item.address);
+                                if (f && !seen.has(f)) { seen.add(f); item.fmt = f; unique.push(item); }
+                            });
+                            setSuggestions(unique); setShowSuggestions(true);
+                        }
+                    } catch (e) {}
+                }, 500);
+            };
+
+            const handleSuggestionClick = async (s) => {
+                setAddress(s.fmt); setShowSuggestions(false); setLoading(true);
+                try { await fetchEnvironmentalData(parseFloat(s.lat), parseFloat(s.lon), s.fmt); } 
+                catch (e) { setError(e.message); setLoading(false); }
+            };
+
+            const getWeatherIcon = (code) => {
+                const color = isDarkMode ? 'text-yellow-500' : 'text-lime-700';
+                if (code <= 3) return <Icon name="activity" className={color} />;
+                if (code <= 67) return <Icon name="cloudRain" className={theme.accentPrimary} />;
+                return <Icon name="alertTriangle" className={theme.textSub} />;
+            };
+
             return (
                 <div className={`min-h-screen font-sans flex flex-col transition-colors duration-300 ${theme.bg} ${theme.textMain}`}>
                     <header className={`${theme.cardBg} shadow-sm border-b ${theme.cardBorder} px-4 py-3 flex items-center justify-between z-20 sticky top-0`}>
                         <div className="flex items-center gap-2">
-                            <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}><Icon name="map-pin" size={18}/></div>
+                            <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}><Icon name="mapPin" size={18}/></div>
                             <div>
                                 <h1 className="text-xl font-bold tracking-tight">Stay Dry</h1>
                                 <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase`}><div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>Ho Chi Minh City</div>
@@ -321,13 +424,13 @@
 
                     <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full gap-6 grid grid-cols-1 lg:grid-cols-3 h-auto">
                         <div className="lg:col-span-1 flex flex-col gap-4">
-                            <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} relative z-30`}>
+                            <div ref={searchContainerRef} className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} relative z-30`}>
                                 <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-stone-500">
                                     <Icon name="calendar" size={14} className={theme.accentPrimary} /><span>{currentTime || "Loading..."}</span>
                                 </div>
                                 <div className="flex gap-2">
-                                    <button onClick={handleGetLocation} disabled={loading} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-bold text-white text-sm ${theme.buttonPrimary} shadow-sm active:scale-95`}>
-                                        {loading ? "Loading..." : <><Icon name="navigation" size={16} /> Use My Location</>}
+                                    <button onClick={handleGetLocation} disabled={loading} className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-white text-sm ${theme.buttonPrimary} shadow-sm active:scale-95 whitespace-nowrap`}>
+                                        {loading ? "Locating..." : <><Icon name="navigation" size={16} /> Use My Location</>}
                                     </button>
                                     <button onClick={() => setIsPinMode(!isPinMode)} className={`w-14 flex items-center justify-center rounded-lg border transition-all ${isPinMode ? theme.highlight : theme.buttonSecondary}`}><Icon name="crosshair" size={20} /></button>
                                 </div>
@@ -335,7 +438,7 @@
                                 {error && <div className="mt-3 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">{error}</div>}
                             </div>
 
-                            {!data && !loading && <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}><Icon name="map-pin" size={48} className="mb-4 opacity-20" /><p className="text-center text-sm">Use GPS or Pin to check Rain & Tides.</p></div>}
+                            {!data && !loading && <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}><Icon name="mapPin" size={48} className="mb-4 opacity-20" /><p className="text-center text-sm">Use GPS or Pin to check Rain & Tides.</p></div>}
 
                             {data && (
                                 <>
@@ -354,7 +457,7 @@
                                     </div>
 
                                     <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
-                                        <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><Icon name="cloud-rain" size={18} className={theme.accentPrimary}/><span className="font-semibold">Rain Status</span></div><span className={`text-xs font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain > 0 ? 'RAINING' : 'DRY'}</span></div>
+                                        <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><Icon name="cloudRain" size={18} className={theme.accentPrimary}/><span className="font-semibold">Rain Status</span></div><span className={`text-xs font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain > 0 ? 'RAINING' : 'DRY'}</span></div>
                                         <div className="flex items-end gap-2 mb-2"><span className={`text-3xl font-bold ${getStatusColor(data.weather.rain, 'rain')}`}>{data.weather.rain}</span><span className={`text-sm ${theme.textSub} mb-1`}>mm current</span></div>
                                         <div className="grid grid-cols-2 gap-2 text-xs">
                                             <div className={`p-2 rounded border ${theme.inputBorder} ${theme.inputBg}`}><div className={theme.textSub}>Next Hour</div><div className={`font-bold ${data.weather.nextHourProb > 50 ? 'text-orange-500' : 'text-lime-600'}`}>{data.weather.nextHourProb}% Chance</div></div>
