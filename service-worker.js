@@ -1,5 +1,5 @@
-// BUMPED TO v14 TO FORCE UPDATE
-const CACHE_NAME = 'stay-dry-hcmc-v14';
+// BUMPED TO v16 TO FORCE UPDATE
+const CACHE_NAME = 'stay-dry-hcmc-v16';
 
 const urlsToCache = [
   '/',
@@ -26,8 +26,9 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          // Delete old caches (v1 through v13)
+          // Delete old caches (v1 through v15)
           if (cacheWhitelist.indexOf(cacheName) === -1) {
+            console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName); 
           }
         })
