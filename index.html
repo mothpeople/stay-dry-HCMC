@@ -3,12 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <!-- NO-CACHE HEADERS -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
     <title>Stay Dry HCMC</title>
     
     <!-- SOCIAL SHARE TAGS -->
     <meta property="og:title" content="Stay Dry HCMC">
     <meta property="og:description" content="Real-time flood and weather monitoring for Ho Chi Minh City.">
-    <meta property="og:image" content="https://cdn-icons-png.flaticon.com/512/1163/1163624.png"> 
+    <meta property="og:image" content="https://stay-dry-hcmc.vercel.app/logo.png"> 
     <meta property="og:url" content="https://stay-dry-hcmc.vercel.app">
     <meta property="og:type" content="website">
 
@@ -17,7 +23,7 @@
     <meta name="theme-color" content="#f7fee7">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1163/1163624.png">
+    <link rel="apple-touch-icon" href="/logo.png">
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -33,11 +39,10 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- Lucide Icons (Vanilla JS version) -->
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <style>
-        /* Force map height if Tailwind fails */
         #map { min-height: 400px; height: 100%; width: 100%; z-index: 1; }
         body { overscroll-behavior-y: none; }
     </style>
@@ -49,15 +54,9 @@
         const { useState, useEffect, useRef } = React;
 
         // --- Icon Wrapper Component ---
-        // This adapts standard Lucide names to render the SVG directly
         const Icon = ({ name, size = 24, className, ...props }) => {
-            const iconName = name.charAt(0).toLowerCase() + name.slice(1); // Ensure camelCase
-            // Lucide creates icons as objects in the global window.lucide.icons
             const iconData = window.lucide && window.lucide.icons ? window.lucide.icons[name] : null;
-
             if (!iconData) return null;
-
-            // Render SVG manually since we don't have the react library wrapper here
             return (
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -73,15 +72,13 @@
                     {...props}
                     dangerouslySetInnerHTML={{ __html: iconData.map(child => {
                         const [tag, attrs] = child;
-                        // A very basic reconstruction of the SVG path strings from lucide data
                         return `<${tag} ${Object.entries(attrs).map(([k, v]) => `${k}="${v}"`).join(' ')} />`
                     }).join('') }}
                 />
             );
         };
 
-        // Map Lucide-React names to the global Lucide names
-        // We just use the component name as the string key for the Icon component
+        // Map Lucide Icons
         const Search = (props) => <Icon name="Search" {...props} />;
         const MapPin = (props) => <Icon name="MapPin" {...props} />;
         const Droplets = (props) => <Icon name="Droplets" {...props} />;
@@ -102,7 +99,6 @@
         const Video = (props) => <Icon name="Video" {...props} />;
         const MapIcon = (props) => <Icon name="Map" {...props} />;
         const Calendar = (props) => <Icon name="Calendar" {...props} />;
-
 
         // --- Main App Logic ---
 
@@ -134,7 +130,7 @@
                 cardBorder: 'border-slate-800',
                 inputBg: 'bg-slate-800',
                 inputBorder: 'border-slate-700',
-                accentPrimary: 'text-blue-400',
+                accentPrimary: 'text-blue-400', 
                 buttonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white',
                 buttonSecondary: 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750',
                 highlight: 'bg-blue-900/30 text-blue-300 border-blue-800/50',
@@ -142,14 +138,14 @@
             },
             light: {
                 name: 'light',
-                bg: 'bg-lime-50',
+                bg: 'bg-lime-50', 
                 textMain: 'text-stone-800',
                 textSub: 'text-stone-500',
                 cardBg: 'bg-white',
                 cardBorder: 'border-lime-100',
                 inputBg: 'bg-stone-50',
                 inputBorder: 'border-stone-200',
-                accentPrimary: 'text-lime-700',
+                accentPrimary: 'text-lime-700', 
                 buttonPrimary: 'bg-lime-700 hover:bg-lime-800 text-white',
                 buttonSecondary: 'bg-white border-lime-200 text-lime-700 hover:bg-lime-50',
                 highlight: 'bg-lime-100 text-lime-800 border-lime-200',
@@ -178,13 +174,14 @@
             const searchContainerRef = useRef(null);
             const debounceTimerRef = useRef(null); 
 
-            // Service Worker Registration (Safely wrapped)
+            // Service Worker (Safe Register)
             useEffect(() => {
-                // Only attempt registration if supported AND protocol is http/https (not blob/file)
-                if ('serviceWorker' in navigator && 
-                    (window.location.protocol === 'https:' || window.location.protocol === 'http:')) {
+                if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.protocol === 'http:')) {
                     navigator.serviceWorker.register('/service-worker.js')
-                        .catch(err => console.log('SW Reg Skipped (Env):', err.message));
+                        .then(reg => {
+                            reg.update(); // Force update check
+                        })
+                        .catch(err => console.log('SW Reg:', err));
                 }
             }, []);
 
@@ -212,7 +209,7 @@
             }, []);
 
             const getStatusColor = (value, type) => {
-                if (isDarkMode) return 'text-slate-100';
+                if (isDarkMode) return 'text-slate-100'; 
                 const SAFE = 'text-lime-600';
                 const WARN = 'text-orange-500';
                 const DANGER = 'text-red-600';
@@ -231,17 +228,13 @@
 
             // Load Leaflet
             useEffect(() => {
-                if (window.L) {
-                    setLeafletLoaded(true);
-                } else {
-                    const checkL = setInterval(() => {
-                        if (window.L) {
-                            setLeafletLoaded(true);
-                            clearInterval(checkL);
-                        }
-                    }, 200);
-                    return () => clearInterval(checkL);
-                }
+                const checkL = setInterval(() => {
+                    if (window.L) {
+                        setLeafletLoaded(true);
+                        clearInterval(checkL);
+                    }
+                }, 200);
+                return () => clearInterval(checkL);
             }, []);
 
             // Initialize Map
@@ -250,19 +243,9 @@
                 if (!window.L) return;
 
                 try {
-                    const map = window.L.map(mapRef.current, {
-                        center: HCMC_CENTER,
-                        zoom: 12,
-                        minZoom: 10,
-                        maxBounds: HCMC_BOUNDS, 
-                        maxBoundsViscosity: 1.0 
-                    });
-
-                    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }).addTo(map);
-
-                    // Add Hotspots
+                    const map = window.L.map(mapRef.current, { center: HCMC_CENTER, zoom: 11, minZoom: 10, maxBounds: HCMC_BOUNDS, maxBoundsViscosity: 1.0 });
+                    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(map);
+                    
                     FLOOD_HOTSPOTS.forEach(spot => {
                         const marker = window.L.circleMarker([spot.lat, spot.lng], { color: 'red', fillColor: '#f03', fillOpacity: 0.5, radius: 8 }).addTo(map);
                         marker.bindPopup(`<b>${spot.name}</b><br>${spot.desc}`);
@@ -327,7 +310,6 @@
             // Update Map Visuals
             useEffect(() => {
                 if (!mapInstance || !data || !window.L) return;
-
                 const { lat, lng } = data.coords;
                 mapInstance.setView([lat, lng], 14);
 
@@ -338,12 +320,7 @@
                 newMarker.bindPopup(`<b>${data.location}</b>`).openPopup();
                 markerRef.current = newMarker;
 
-                const newCircle = window.L.circle([lat, lng], {
-                    color: isDarkMode ? '#3b82f6' : '#65a30d',
-                    fillColor: isDarkMode ? '#3b82f6' : '#65a30d',
-                    fillOpacity: 0.1,
-                    radius: 5000
-                }).addTo(mapInstance);
+                const newCircle = window.L.circle([lat, lng], { color: isDarkMode ? '#3b82f6' : '#65a30d', fillColor: isDarkMode ? '#3b82f6' : '#65a30d', fillOpacity: 0.1, radius: 5000 }).addTo(mapInstance);
                 circleRef.current = newCircle;
 
                 mapInstance.panTo([lat, lng]);
@@ -355,10 +332,7 @@
                 const street = addrObj.road || addrObj.street || addrObj.pedestrian || "";
                 const ward = addrObj.quarter || addrObj.ward || "";
                 const district = addrObj.city_district || addrObj.district || "";
-                const parts = [];
-                if (street) parts.push(street);
-                if (ward) parts.push(ward.includes('Phường') ? ward : `Phường ${ward}`);
-                if (district) parts.push(district);
+                const parts = [street, ward.includes('Phường') ? ward : `Phường ${ward}`, district].filter(Boolean);
                 return parts.length > 0 ? parts.join(', ') : (addrObj.city || "Ho Chi Minh City");
             };
 
@@ -382,7 +356,7 @@
 
                     const current = weatherData.current;
                     const hourly = weatherData.hourly;
-                    const aqi = aqiData && aqiData.current ? aqiData.current.us_aqi : 50; 
+                    const aqi = aqiData && aqiData.current ? aqiData.current.us_aqi : null; 
                     
                     const currentHour = new Date().getHours();
                     const uvIndex = hourly.uv_index[currentHour] || 0;
@@ -396,7 +370,7 @@
                         const lows = marineData.daily.tide_low.slice(0, 2);
                         const formatTime = (iso) => {
                             const d = new Date(iso);
-                            d.setHours(d.getHours() + 4); // +4h shift
+                            d.setHours(d.getHours() + 4); 
                             return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
                         };
                         
@@ -438,8 +412,7 @@
             };
 
             const handleInputChange = (e) => {
-                const value = e.target.value;
-                setAddress(value);
+                const value = e.target.value; setAddress(value);
                 if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
                 if (!value.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
                 debounceTimerRef.current = setTimeout(async () => {
@@ -487,6 +460,14 @@
                 } catch (err) { setError(err.message); setLoading(false); }
             };
 
+            const generateNewsUpdates = (rain, nextProb) => {
+                const updates = [];
+                updates.push({ source: 'Official Traffic Map', type: 'traffic-button', url: 'https://giaothong.hochiminhcity.gov.vn/' });
+                if (rain > 10 || nextProb > 60) updates.push({ source: 'Hydro-Met Service', time: 'Alert', text: 'Heavy rain predicted. Check flood zones.', type: 'warning', url: 'https://nchmf.gov.vn/' });
+                else updates.push({ source: 'Hydro-Met Service', time: 'Today', text: 'Normal weather conditions reported.', type: 'info', url: 'https://nchmf.gov.vn/' });
+                return updates;
+            };
+
             const generateTideFallback = () => {
                 const today = new Date().getDate();
                 const shift = today * 48; 
@@ -504,14 +485,6 @@
                     { type: 'High', time: getHmm(baseH + 744), height: '3.9m' },
                     { type: 'Low', time: getHmm(baseH + 1116), height: '0.8m' }
                 ];
-            };
-
-            const generateNewsUpdates = (rain, nextProb) => {
-                const updates = [];
-                updates.push({ source: 'Official Traffic Map', type: 'traffic-button', url: 'https://giaothong.hochiminhcity.gov.vn/' });
-                if (rain > 10 || nextProb > 60) updates.push({ source: 'Hydro-Met Service', time: 'Alert', text: 'Heavy rain predicted. Check flood zones.', type: 'warning', url: 'https://nchmf.gov.vn/' });
-                else updates.push({ source: 'Hydro-Met Service', time: 'Today', text: 'Normal weather conditions reported.', type: 'info', url: 'https://nchmf.gov.vn/' });
-                return updates;
             };
 
             const getWeatherIcon = (code) => {
@@ -534,8 +507,8 @@
                                 <MapPin size={18} className="md:w-5 md:h-5" />
                             </div>
                             <div>
-                                <h1 className="text-lg md:text-xl tracking-tight text-stone-800 dark:text-white">
-                                    <span className="font-bold">Stay Dry:</span> <span className="font-normal">Ho Chi Minh City</span>
+                                <h1 className={`text-lg md:text-xl tracking-tight font-bold ${isDarkMode ? 'text-white' : 'text-black'}`}>
+                                    Stay Dry
                                 </h1>
                                 <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase`}>
                                     <div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>
@@ -578,14 +551,14 @@
                                     </form>
                                     <button onClick={() => setIsPinMode(!isPinMode)} className={`p-3 rounded-lg border ${isPinMode ? theme.highlight : theme.buttonSecondary}`}><Crosshair size={20} /></button>
                                 </div>
-                                {isPinMode && <div className={`mt-3 text-xs px-3 py-2 rounded border animate-pulse ${theme.highlight}`}>Click map to select.</div>}
+                                {isPinMode && <div className={`mt-3 text-xs px-3 py-2 rounded border animate-pulse ${theme.highlight}`}>Click anywhere on the map.</div>}
                                 {error && <div className="mt-3 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100"><AlertTriangle size={16} className="inline mr-2"/>{error}</div>}
                             </div>
 
                             {!data && !loading && (
                                 <div className={`flex-1 flex flex-col items-center justify-center ${theme.textSub} ${theme.inputBg} rounded-xl border-2 border-dashed ${theme.cardBorder} p-8 min-h-[200px]`}>
                                     <MapPin size={48} className="mb-4 opacity-20" />
-                                    <p className="text-center text-sm">Search to check Rain, UV, and Tides.</p>
+                                    <p className="text-center text-sm">Search for a location to view real-time data.</p>
                                 </div>
                             )}
 
@@ -630,7 +603,7 @@
                                         </div>
                                         <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                                             <div className="flex justify-between"><span className={`text-xs font-medium ${theme.textSub}`}>AIR (AQI)</span><Wind size={20} className={getStatusColor(data.weather.aqi, 'aqi')}/></div>
-                                            <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi}</div>
+                                            <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi || "--"}</div>
                                             <div className="text-[10px] text-slate-400">US Standard</div>
                                         </div>
                                     </div>
