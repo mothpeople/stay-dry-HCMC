@@ -8,8 +8,8 @@ const HCMC_BOUNDS = [
   [11.1600, 107.0200] 
 ];
 
-// Reference: Vung Tau Ocean Station (Data is always available here)
-const TIDE_STATION_COORDS = { lat: 10.34, lng: 107.08 };
+// Reference Station for Tides (Soai Rap junction)
+const TIDE_STATION_COORDS = { lat: 10.690, lng: 106.760 };
 
 // KNOWN FLOOD HOTSPOTS (Static Data)
 const FLOOD_HOTSPOTS = [
@@ -70,11 +70,11 @@ export default function App() {
   const mapRef = useRef(null);
   const markerRef = useRef(null);
   const circleRef = useRef(null);
-  const searchContainerRef = useRef(null); // Ref for click-outside detection
   const hotspotMarkersRef = useRef([]); 
   const debounceTimerRef = useRef(null); 
+  const searchContainerRef = useRef(null);
 
-  // --- Clock (VN Time) ---
+  // --- Clock ---
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -86,12 +86,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // --- Click Outside to Close Dropdown ---
+  // --- Click Outside ---
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
-        setShowSuggestions(false);
-      }
+        if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
+            setShowSuggestions(false);
+        }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -182,19 +182,33 @@ export default function App() {
     setTimeout(() => mapInstance.invalidateSize(), 200);
   }, [data, mapInstance, isDarkMode]);
 
-  // --- Address Standardizer ---
-  const formatAddress = (addrObj) => {
-    if (!addrObj) return "Unknown Location";
-    const street = addrObj.road || addrObj.street || addrObj.pedestrian || "";
-    const ward = addrObj.ward || addrObj.quarter || "";
-    const district = addrObj.city_district || addrObj.district || "";
+  // --- Address Standardizer (The Logic) ---
+  const formatAddress = (addrObj, strictCityCheck = true) => {
+    if (!addrObj) return null;
+
+    // 1. Strict City Filter (Only for Search Suggestions)
+    // For Map clicks, we might disable this if we trust the bounds check
+    if (strictCityCheck) {
+        const city = addrObj.city || addrObj.state || addrObj.county || "";
+        const isHCMC = city.toLowerCase().includes("hồ chí minh") || city.toLowerCase().includes("ho chi minh");
+        if (!isHCMC) return null; 
+    }
+
+    const street = addrObj.road || addrObj.street || addrObj.pedestrian;
+    let ward = addrObj.quarter || addrObj.ward || addrObj.neighbourhood;
+    const district = addrObj.city_district || addrObj.district || addrObj.suburb;
+
+    if (!street) return null; // Must have street
+
+    // Fix Ward Prefix
+    if (ward && !ward.toLowerCase().includes('phường') && !ward.toLowerCase().startsWith('p.')) {
+        ward = `Phường ${ward}`;
+    }
+
+    // Build Parts: Street, Ward, District
+    const parts = [street, ward, district].filter(Boolean);
     
-    const parts = [];
-    if (street) parts.push(street);
-    if (ward) parts.push(ward.includes('Phường') ? ward : `Phường ${ward}`);
-    if (district) parts.push(district);
-    
-    return parts.length > 0 ? parts.join(', ') : (addrObj.city || "Ho Chi Minh City");
+    return parts.length > 0 ? parts.join(', ') : null;
   };
 
   // --- Data Fetching ---
@@ -203,12 +217,9 @@ export default function App() {
       const weatherRes = await fetch(
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&hourly=uv_index,precipitation_probability,precipitation&daily=uv_index_max&air_quality=us_aqi&timezone=Asia%2FHo_Chi_Minh`
       );
-      
       const marineRes = await fetch(
         `https://marine-api.open-meteo.com/v1/marine?latitude=${TIDE_STATION_COORDS.lat}&longitude=${TIDE_STATION_COORDS.lng}&daily=tide_high,tide_low&timezone=Asia%2FHo_Chi_Minh`
       );
-
-      // Dedicated Air Quality API Call to fix "locked at 50" issue
       const aqiRes = await fetch(
         `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&current=us_aqi&timezone=Asia%2FHo_Chi_Minh`
       );
@@ -221,8 +232,6 @@ export default function App() {
 
       const current = weatherData.current;
       const hourly = weatherData.hourly;
-      
-      // Fix: Read AQI from dedicated response, fallback to 50 only if totally failed
       const aqi = aqiData && aqiData.current ? aqiData.current.us_aqi : 50; 
       
       const currentHour = new Date().getHours();
@@ -235,22 +244,16 @@ export default function App() {
       if (marineData && marineData.daily) {
         const highs = marineData.daily.tide_high.slice(0, 2);
         const lows = marineData.daily.tide_low.slice(0, 2);
-        const formatTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        const formatTime = (iso) => {
+            const d = new Date(iso);
+            d.setHours(d.getHours() + 4); 
+            return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        };
         
         if (highs.length > 0 && lows.length > 0) {
-            // Apply +4 hour shift for river travel time from Vung Tau to HCMC
-            // Note: Open-Meteo returns ISO strings. We parse, add hours, then format.
-            const shiftTime = (iso) => {
-                const d = new Date(iso);
-                d.setHours(d.getHours() + 4);
-                return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-            };
-
-            highs.forEach(t => tideData.push({ type: 'High', time: shiftTime(t), height: '3.5m' })); 
-            lows.forEach(t => tideData.push({ type: 'Low', time: shiftTime(t), height: '1.1m' }));
-            
-            // Sort by time roughly (AM/PM string sort is tricky, so we trust API order largely)
-            // Just ensure High/Low columns are populated correctly in render
+            highs.forEach(t => tideData.push({ type: 'High', time: formatTime(t), height: '3.5m' })); 
+            lows.forEach(t => tideData.push({ type: 'Low', time: formatTime(t), height: '1.1m' }));
+            tideData.sort((a, b) => new Date('1970/01/01 ' + a.time) - new Date('1970/01/01 ' + b.time));
         } else {
             tideData = generateTideFallback();
         }
@@ -286,7 +289,9 @@ export default function App() {
 
   // --- Search & Input Logic ---
   const handleInputChange = (e) => {
-    const value = e.target.value; setAddress(value);
+    const value = e.target.value;
+    setAddress(value);
+    
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     if (!value.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
     
@@ -297,9 +302,11 @@ export default function App() {
             const rawResults = await res.json();
             const uniqueResults = [];
             const seenAddresses = new Set();
+            
             rawResults.forEach(item => {
-                const fmt = formatAddress(item.address);
-                if (fmt && fmt !== "Ho Chi Minh City" && !seenAddresses.has(fmt)) {
+                // Strict City Check = TRUE for Search
+                const fmt = formatAddress(item.address, true);
+                if (fmt && !seenAddresses.has(fmt)) {
                     seenAddresses.add(fmt);
                     item.formatted_display = fmt;
                     uniqueResults.push(item);
@@ -312,46 +319,100 @@ export default function App() {
     }, 500);
   };
 
+  // --- CLICK HANDLER (UPDATED) ---
   const handleSuggestionClick = async (s) => { 
-      const f = s.formatted_display || formatAddress(s.address); 
+      const f = s.formatted_display; 
       setAddress(f); 
-      setShowSuggestions(false); // Force close
-      setSuggestions([]); // Clear data
+      setShowSuggestions(false); 
+      setSuggestions([]); 
       setLoading(true); setError(null); 
       try { 
           await fetchEnvironmentalData(parseFloat(s.lat), parseFloat(s.lon), f); 
       } catch (e) { setError(e.message); setLoading(false); } 
   };
 
+  // --- SEARCH ENTER HANDLER ---
   const handleSearch = async (e) => { 
       e.preventDefault(); if(!address.trim()) return; setLoading(true); 
-      setShowSuggestions(false); // Force close on enter key
+      setShowSuggestions(false); 
       try { 
           const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&viewbox=106.3,11.2,107.1,10.3&bounded=1&countrycodes=vn&addressdetails=1`); 
           const d = await r.json(); 
-          if(!d.length) throw new Error("Not found"); 
-          await fetchEnvironmentalData(parseFloat(d[0].lat), parseFloat(d[0].lon), formatAddress(d[0].address)); 
+          if(!d.length) throw new Error("Not found in HCMC"); 
+          
+          // Find first valid HCMC result
+          const validLoc = d.find(loc => formatAddress(loc.address, true) !== null);
+          
+          if (!validLoc) throw new Error("Address not found in Ho Chi Minh City.");
+          
+          await fetchEnvironmentalData(parseFloat(validLoc.lat), parseFloat(validLoc.lon), formatAddress(validLoc.address, true)); 
       } catch (e) { setError(e.message); setLoading(false); } 
   };
 
+  // --- PIN MAP CLICK HANDLER ---
+  useEffect(() => {
+    if (!mapInstance) return;
+    const container = mapInstance.getContainer();
+    if (isPinMode) {
+        container.classList.add('crosshair-active');
+        container.style.cursor = 'crosshair';
+    } else {
+        container.classList.remove('crosshair-active');
+        container.style.cursor = '';
+    }
+    const onMapClick = async (e) => {
+        if (!isPinMode) return;
+        const { lat, lng } = e.latlng;
+        // Check bounds
+        if (lat < HCMC_BOUNDS[0][0] || lat > HCMC_BOUNDS[1][0] || lng < HCMC_BOUNDS[0][1] || lng > HCMC_BOUNDS[1][1]) {
+            setError("Please select a location inside Ho Chi Minh City.");
+            return;
+        }
+        setIsPinMode(false);
+        setLoading(true);
+        setError(null);
+        setSuggestions([]); 
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
+            const data = await res.json();
+            
+            // For MAP CLICK: strictCityCheck = false
+            // We trust the geometric bounds (lat/lng) more than the API's string label
+            // The API might call a coordinate "HCMC" or "Vietnam" or nothing, but if it's in the box, we use it.
+            let formattedAddr = formatAddress(data.address, false); 
+            
+            if (!formattedAddr) {
+                // Fallback if address format is totally broken
+                formattedAddr = `Selected Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+            }
+
+            setAddress(formattedAddr); 
+            await fetchEnvironmentalData(lat, lng, formattedAddr);
+        } catch (err) {
+            setError("Failed to retrieve location data.");
+            setLoading(false);
+        }
+    };
+    mapInstance.on('click', onMapClick);
+    return () => {
+        mapInstance.off('click', onMapClick);
+        container.classList.remove('crosshair-active');
+        container.style.cursor = '';
+    };
+  }, [mapInstance, isPinMode]);
+
   const generateNewsUpdates = (rain, nextProb) => {
     const updates = [];
-    updates.push({ 
-        source: 'Official Traffic Map', 
-        type: 'traffic-button', 
-        url: 'https://giaothong.hochiminhcity.gov.vn/'
-    });
+    updates.push({ source: 'Official Traffic Map', type: 'traffic-button', url: 'https://giaothong.hochiminhcity.gov.vn/' });
     if (rain > 10 || nextProb > 60) updates.push({ source: 'Hydro-Met Service', time: 'Alert', text: 'Heavy rain predicted. Check flood zones.', type: 'warning', url: 'https://nchmf.gov.vn/' });
     else updates.push({ source: 'Hydro-Met Service', time: 'Today', text: 'Normal weather conditions reported.', type: 'info', url: 'https://nchmf.gov.vn/' });
     return updates;
   };
 
   const generateTideFallback = () => {
-      // Improved fallback with slight randomization so it doesn't look identical every day if offline
       const today = new Date().getDate();
-      const shift = today * 48; // shift ~48 mins per day (lunar day)
-      const baseH = 4 * 60 + 30 + shift; // 04:30 + shift
-      
+      const shift = today * 48; 
+      const baseH = 4 * 60 + 30 + shift; 
       const getHmm = (mins) => {
           const h = Math.floor((mins % 1440) / 60);
           const m = mins % 60;
@@ -359,12 +420,11 @@ export default function App() {
           const h12 = h % 12 || 12;
           return `${h12}:${m.toString().padStart(2,'0')} ${ampm}`;
       };
-
       return [
         { type: 'High', time: getHmm(baseH), height: '3.4m' },
-        { type: 'Low', time: getHmm(baseH + 372), height: '1.1m' }, // +6h 12m
-        { type: 'High', time: getHmm(baseH + 744), height: '3.9m' }, // +12h 24m
-        { type: 'Low', time: getHmm(baseH + 1116), height: '0.8m' }  // +18h 36m
+        { type: 'Low', time: getHmm(baseH + 372), height: '1.1m' },
+        { type: 'High', time: getHmm(baseH + 744), height: '3.9m' },
+        { type: 'Low', time: getHmm(baseH + 1116), height: '0.8m' }
       ];
   };
 
@@ -387,7 +447,7 @@ export default function App() {
         <div className="flex items-center gap-2">
           <div className={`${isDarkMode ? 'bg-blue-600' : 'bg-lime-700'} p-2 rounded-lg text-white shadow-lg`}><MapPin size={18}/></div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-stone-800 dark:text-white">Stay Dry</h1>
+            <h1 className={`text-xl font-bold tracking-tight ${isDarkMode ? 'text-white' : 'text-black'}`}>Stay Dry</h1>
             <div className={`flex items-center gap-1 text-[10px] ${theme.accentPrimary} font-medium uppercase`}><div className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-lime-500'} animate-pulse`}></div>Ho Chi Minh City</div>
           </div>
         </div>
@@ -435,7 +495,7 @@ export default function App() {
                 <h2 className="text-lg font-bold leading-tight">{data.location}</h2>
               </div>
 
-              {/* Weather Grid (Temp & Humidity) */}
+              {/* Weather Grid */}
               <div className="grid grid-cols-2 gap-3">
                 <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder} flex flex-col justify-between`}>
                   <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>TEMP</span>{getWeatherIcon(data.weather.code)}</div>
@@ -464,7 +524,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Commute Conditions (UV & Air) */}
+              {/* Commute Conditions */}
               <div className="grid grid-cols-2 gap-3">
                 <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                   <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>UV INDEX</span><Sun size={20} className={getStatusColor(data.weather.uv, 'uv')}/></div>
@@ -473,7 +533,7 @@ export default function App() {
                 </div>
                 <div className={`${theme.cardBg} p-4 rounded-xl shadow-sm border ${theme.cardBorder}`}>
                   <div className="flex justify-between items-start"><span className={`text-xs font-medium ${theme.textSub}`}>AIR (AQI)</span><Wind size={20} className={getStatusColor(data.weather.aqi, 'aqi')}/></div>
-                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi}</div>
+                  <div className={`text-2xl font-bold ${getStatusColor(data.weather.aqi, 'aqi')}`}>{data.weather.aqi || "--"}</div>
                   <div className="text-[10px] text-slate-400">US Standard</div>
                 </div>
               </div>
